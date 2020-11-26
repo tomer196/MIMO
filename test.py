@@ -4,42 +4,32 @@ from torch.utils.tensorboard import SummaryWriter
 from torch.nn import functional as F
 from torch.utils.data import DataLoader
 from data_load import SmatData
+import time
 
-import argparse
 import os
 from utils import *
 
-
-def create_arg_parser():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--data-path', type=str, default='/Data/Training/', help='Path to the dataset')
-    parser.add_argument('--freq-start', type=int, default=62, help='GHz')
-    parser.add_argument('--freq-stop', type=int, default=69, help='GHz')
-    parser.add_argument('--freq-points', type=int, default=75, help='Number of freqs points')
-    parser.add_argument('--Nfft', type=int, default=256, help='number of fft points')
-    parser.add_argument('--numOfDigitalBeams', type=int, default=32, help='numOfDigitalBeams')
-    parser.add_argument('--start-angle', type=float, default=60, help='start angle for beamforming (deg)')
-    return parser.parse_args()
-
-
 args = create_arg_parser()
-data_set = SmatData(os.getcwd() + args.data_path)
-Smat = data_set[0]
-H, ants_locations, freqs, TxRxPairs = create_steering_matrix(args)
-plot_beampatern(H, ants_locations, freqs)
+data_set = SmatData(args.data_path)
+Smat, mean, std = data_set[0]
+Smat = unnormalize_complex(Smat, mean, std)
 
-rangeAzMap = beamforming(H, Smat, args)
-polar_plot(rangeAzMap, freqs, args)
+steering_dict = create_steering_matrix(args)
+# plot_beampatern(steering_dict)
 
-rx_low = [20, 22, 24, 26, 28, 30, 32, 34, 36, 38]
-# rx = range(20, 40)
-ind = [True if txrx[1] in rx_low else False for txrx in TxRxPairs]
+rangeAzMap = beamforming(Smat, steering_dict, args)
+polar_plot(rangeAzMap, steering_dict, args).show()
+
+rx_low = [0, 2, 4, 6, 8, 10, 12, 14, 16, 18]
+# rx = range(20)
+ind = [True if txrx[0] in rx_low else False for txrx in steering_dict['TxRxPairs']]
 Smat_low = Smat[ind]
-H_low = H[ind]
+steering_dict_low = steering_dict.copy()
+steering_dict_low['H'] = steering_dict['H'][ind]
 
-rangeAzMap = beamforming(H_low, Smat_low, args)
-polar_plot(rangeAzMap, freqs, args)
+rangeAzMap = beamforming(Smat_low, steering_dict_low, args)
+polar_plot(rangeAzMap, steering_dict, args).show()
 
-# cartesian_plot(rangeAzMap, freqs, args)
+# cartesian_plot(rangeAzMap, steering_dict, args)
 
 print('Done')

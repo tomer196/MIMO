@@ -3,11 +3,13 @@ import random
 import h5py
 from torch.utils.data import Dataset
 from torch import Tensor, cfloat, complex
+from utils import normalize_complex
 
 
 class SmatData(Dataset):
     def __init__(self, root, sample_rate=1):
         self.file_names = []
+        root = os.getcwd() + root
         for current_dir, sub_dirs, files in os.walk(root):
             for name in files:
                 if name.endswith(".h5") and not current_dir.endswith('cars'):
@@ -24,4 +26,4 @@ class SmatData(Dataset):
         fname = self.file_names[i]
         with h5py.File(fname, 'r') as data:
             Smat = data['Smat'][()]
-        return complex(real=Tensor(Smat.real), imag=Tensor(Smat.imag))
+        return normalize_complex(complex(real=Tensor(Smat.real), imag=Tensor(Smat.imag)))

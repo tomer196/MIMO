@@ -1,4 +1,3 @@
-from data_load import SmatData
 import pathlib
 import random
 import shutil
@@ -7,30 +6,37 @@ import os
 # os.environ["CUDA_VISIBLE_DEVICES"] = "6"
 import sys
 
-sys.path.insert(0, '/home/tomerweiss/multiPILOT2')
+# sys.path.insert(0, '/Users/tomer/OneDrive - Technion/Desktop/Teachnion/RF/MIMO')
 
 import numpy as np
 # np.seterr('raise')
 import torch
+from torch import abs
 from torch.utils.tensorboard import SummaryWriter
 from torch.nn import functional as F
 from torch.utils.data import DataLoader
+import torchvision
 from data_load import SmatData
 
 import matplotlib
 # matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import scipy.io as sio
-import argparse
+from models.complex_unet import ComplexUnetModel
+from models.complex_cnn import ComplexCNNModel
+from models.complex_resnet import ResNet
+from utils import *
+
+rx_low = [0, 2, 4, 6, 8, 10, 12, 14, 16, 18]
 
 
 def create_datasets(args):
     train_data = SmatData(
-        root=args.data_path / 'Training',
+        root=args.data_path + 'Training',
         sample_rate=args.sample_rate
     )
     val_data = SmatData(
-        root=args.data_path / 'Validation',
+        root=args.data_path + 'Validation',
         sample_rate=args.sample_rate
     )
     return val_data, train_data
@@ -44,238 +50,101 @@ def create_data_loaders(args):
         dataset=train_data,
         batch_size=args.batch_size,
         shuffle=True,
-        num_workers=20,
+        num_workers=args.num_workers,
         pin_memory=True,
     )
     val_loader = DataLoader(
         dataset=val_data,
         batch_size=args.batch_size,
-        num_workers=20,
+        num_workers=args.num_workers,
         pin_memory=True,
     )
     display_loader = DataLoader(
         dataset=display_data,
         batch_size=16,
-        num_workers=20,
+        num_workers=args.num_workers,
         pin_memory=True,
     )
     return train_loader, val_loader, display_loader
 
 
-def train_epoch(args, epoch, model, data_loader, optimizer, writer):
+def train_epoch(args, epoch, model, data_loader, optimizer, writer, steering_dict):
     model.train()
     avg_loss = 0.
-    if epoch == args.TSP_epoch and args.TSP:
-        x = model.module.get_trajectory()
-        x = x.detach().cpu().numpy()
-        for shot in range(x.shape[0]):
-            x[shot, :, :] = tsp_solver(x[shot, :, :])
-        v, a = get_vel_acc(x)
-        writer.add_figure('TSP_Trajectory', plot_trajectory(x), epoch)
-        writer.add_figure('TSP_Acc', plot_acc(a, args.a_max), epoch)
-        writer.add_figure('TSP_Vel', plot_acc(v, args.v_max), epoch)
-        np.save('trajTSP',x)
-        with torch.no_grad():
-            model.module.subsampling.x.data = torch.tensor(x, device='cuda')
-        args.a_max *= 2
-        args.v_max *= 2
-        args.vel_weight = 1e-3
-        args.acc_weight = 1e-3
-
-    # if epoch == 30:
-    #     v0 = args.gamma * args.G_max * args.FOV * args.dt
-    #     a0 = args.gamma * args.S_max * args.FOV * args.dt ** 2 * 1e3
-    #     args.a_max = a0 *1.5
-    #     args.v_max = v0 *1.5
-
-    # if args.TSP and epoch > args.TSP_epoch and epoch<=args.TSP_epoch*2:
-    #     v0 = args.gamma * args.G_max * args.FOV * args.dt
-    #     a0 = args.gamma * args.S_max * args.FOV * args.dt ** 2 * 1e3
-    #     args.a_max -= a0/args.TSP_epoch
-    #     args.v_max -= v0/args.TSP_epoch
-    #
-    # if args.TSP and epoch==args.TSP_epoch*2:
-    #     v0 = args.gamma * args.G_max * args.FOV * args.dt
-    #     a0 = args.gamma * args.S_max * args.FOV * args.dt ** 2 * 1e3
-    #     args.a_max = a0
-    #     args.v_max = v0
-    #     args.vel_weight *= 10
-    #     args.acc_weight *= 10
-    # if args.TSP and epoch==args.TSP_epoch*2+10:
-    #     args.vel_weight *= 10
-    #     args.acc_weight *= 10
-    # if args.TSP and epoch==args.TSP_epoch*2+20:
-    #     args.vel_weight *= 10
-    #     args.acc_weight *= 10
-    if args.TSP:
-        if epoch < args.TSP_epoch:
-            model.module.subsampling.interp_gap = 1
-        elif epoch < 10 + args.TSP_epoch:
-            model.module.subsampling.interp_gap = 10
-            v0 = args.gamma * args.G_max * args.FOV * args.dt
-            a0 = args.gamma * args.S_max * args.FOV * args.dt ** 2 * 1e3
-            args.a_max -= a0/args.TSP_epoch
-            args.v_max -= v0/args.TSP_epoch
-        elif epoch == 10 + args.TSP_epoch:
-            model.module.subsampling.interp_gap = 10
-            v0 = args.gamma * args.G_max * args.FOV * args.dt
-            a0 = args.gamma * args.S_max * args.FOV * args.dt ** 2 * 1e3
-            args.a_max -= a0 / args.TSP_epoch
-            args.v_max -= v0 / args.TSP_epoch
-        elif epoch == 15 + args.TSP_epoch:
-            model.module.subsampling.interp_gap = 10
-            v0 = args.gamma * args.G_max * args.FOV * args.dt
-            a0 = args.gamma * args.S_max * args.FOV * args.dt ** 2 * 1e3
-            args.a_max -= a0 / args.TSP_epoch
-            args.v_max -= v0 / args.TSP_epoch
-        elif epoch == 20 + args.TSP_epoch:
-            model.module.subsampling.interp_gap = 10
-            args.vel_weight *= 10
-            args.acc_weight *= 10
-        elif epoch == 23 + args.TSP_epoch:
-            model.module.subsampling.interp_gap = 5
-            args.vel_weight *= 10
-            args.acc_weight *= 10
-        elif epoch == 25 + args.TSP_epoch:
-            model.module.subsampling.interp_gap = 1
-            args.vel_weight *= 10
-            args.acc_weight *= 10
-    else:
-        if epoch < 10:
-            model.module.subsampling.interp_gap = 50
-        elif epoch == 10:
-            model.module.subsampling.interp_gap = 30
-        elif epoch == 15:
-            model.module.subsampling.interp_gap = 20
-        elif epoch == 20:
-            model.module.subsampling.interp_gap = 10
-        elif epoch == 23:
-            model.module.subsampling.interp_gap = 5
-        elif epoch == 25:
-            model.module.subsampling.interp_gap = 1
-
-    start_epoch = start_iter = time.perf_counter()
-    print(f'a_max={args.a_max}, v_max={args.v_max}')
+    start_epoch = time.perf_counter()
+    global_step = epoch * len(data_loader)
     for iter, data in enumerate(data_loader):
-        optimizer.zero_grad()
-        input, target, mean, std, norm = data
-        input = input.to(args.device)
-        target = target.to(args.device)
+        smat_target, mean, std = data
+        smat_target = smat_target.to(args.device)
 
-        output = model(input)
-        # output = transforms.complex_abs(output)  # complex to real
-        # output = transforms.root_sum_of_squares(output, dim=1)
-        output=output.squeeze()
+        ind = [True if txrx[0] in rx_low else False for txrx in steering_dict['TxRxPairs']]
+        smat_low = smat_target[:, ind, :]
 
-        x = model.module.get_trajectory()
-        v, a = get_vel_acc(x)
-        acc_loss = torch.sqrt(torch.sum(torch.pow(F.softshrink(a, args.a_max).abs()+1e-8, 2)))
-        vel_loss = torch.sqrt(torch.sum(torch.pow(F.softshrink(v, args.v_max).abs()+1e-8, 2)))
+        smat_rec = model(smat_low)
 
-        rec_loss = F.l1_loss(output, target)
-        if args.TSP and epoch < args.TSP_epoch:
-            loss = args.rec_weight * rec_loss
-        else:
-            loss = args.rec_weight * rec_loss + args.vel_weight * vel_loss + args.acc_weight * acc_loss
+        smat_loss = complex_mse(smat_rec, smat_target)
 
+        smat_rec = unnormalize_complex(smat_rec, mean, std)
+        smat_target = unnormalize_complex(smat_target, mean, std)
+        AzRange_rec = beamforming(smat_rec, steering_dict, args)
+        AzRange_target = beamforming(smat_target, steering_dict, args)
+        az_range_loss = az_range_mse(AzRange_rec, AzRange_target)
+
+        loss = az_range_loss
         loss.backward()
         optimizer.step()
 
         avg_loss = 0.99 * avg_loss + 0.01 * loss.item() if iter > 0 else loss.item()
-        # writer.add_scalar('TrainLoss', loss.item(), global_step + iter)
+        writer.add_scalar('TrainLoss', loss.item(), global_step + iter)
 
-        if iter % args.report_interval == 0:
-            logging.info(
+        if iter % 20 == 0:
+            print(
                 f'Epoch = [{epoch:3d}/{args.num_epochs:3d}] '
                 f'Iter = [{iter:4d}/{len(data_loader):4d}] '
                 f'Loss = {loss.item():.4g} Avg Loss = {avg_loss:.4g} '
-                f'rec_loss: {rec_loss:.4g}, vel_loss: {vel_loss:.4g}, acc_loss: {acc_loss:.4g}'
-            )
-        start_iter = time.perf_counter()
+                f'smat Loss = {smat_loss.item():.4g} AzRange Loss = {az_range_loss:.4g} ')
     return avg_loss, time.perf_counter() - start_epoch
 
 
-def evaluate(args, epoch, model, data_loader, writer):
+def evaluate(args, epoch, model, data_loader, writer, steering_dict):
     model.eval()
-    losses = []
+    smat_losses = []
+    az_range_losses =[]
     start = time.perf_counter()
     with torch.no_grad():
         if epoch != 0:
             for iter, data in enumerate(data_loader):
-                input, target, mean, std, norm = data
-                input = input.to(args.device)
-                target = target.to(args.device)
+                smat_target, mean, std = data
+                smat_target = smat_target.to(args.device)
 
-                output = model(input)
-                # output = transforms.complex_abs(output)  # complex to real
-                # output = transforms.root_sum_of_squares(output, dim=1)
-                output = output.squeeze()
+                ind = [True if txrx[0] in rx_low else False for txrx in steering_dict['TxRxPairs']]
+                smat_low = smat_target[:, ind, :]
 
-                loss = F.l1_loss(output, target)
-                losses.append(loss.item())
+                smat_rec = model(smat_low)
 
-            x = model.module.get_trajectory()
-            v, a = get_vel_acc(x)
-            acc_loss = torch.sqrt(torch.sum(torch.pow(F.softshrink(a, args.a_max), 2)))
-            vel_loss = torch.sqrt(torch.sum(torch.pow(F.softshrink(v, args.v_max), 2)))
-            rec_loss = np.mean(losses)
+                smat_loss = complex_mse(smat_rec, smat_target)
+                
+                smat_rec = unnormalize_complex(smat_rec, mean, std)
+                smat_target = unnormalize_complex(smat_target, mean, std)
+                AzRange_rec = beamforming(smat_rec, steering_dict, args)
+                AzRange_target = beamforming(smat_target, steering_dict, args)
+                az_range_loss = az_range_mse(AzRange_rec, AzRange_target)
 
-            writer.add_scalar('Rec_Loss', rec_loss, epoch)
-            writer.add_scalar('Acc_Loss', acc_loss.detach().cpu().numpy(), epoch)
-            writer.add_scalar('Vel_Loss', vel_loss.detach().cpu().numpy(), epoch)
-            writer.add_scalar('Total_Loss',
-                              rec_loss + acc_loss.detach().cpu().numpy() + vel_loss.detach().cpu().numpy(), epoch)
+                smat_losses.append(smat_loss.item())
+                az_range_losses.append(az_range_loss.item())
 
-        x = model.module.get_trajectory()
-        v, a = get_vel_acc(x)
-        if args.TSP and epoch < args.TSP_epoch:
-            writer.add_figure('Scatter', plot_scatter(x.detach().cpu().numpy()), epoch)
-        else:
-            writer.add_figure('Trajectory', plot_trajectory(x.detach().cpu().numpy()), epoch)
-            writer.add_figure('Scatter', plot_scatter(x.detach().cpu().numpy()), epoch)
-        writer.add_figure('Accelerations_plot', plot_acc(a.cpu().numpy(), args.a_max), epoch)
-        writer.add_figure('Velocity_plot', plot_acc(v.cpu().numpy(), args.v_max), epoch)
-        writer.add_text('Coordinates', str(x.detach().cpu().numpy()).replace(' ', ','), epoch)
+            writer.add_scalar('smat_Loss', np.mean(smat_losses), epoch)
+            writer.add_scalar('AzRange_Loss', np.mean(az_range_losses), epoch)
+        writer.add_text('Rx_low', str(rx_low).replace(' ', ','), epoch)
     if epoch == 0:
         return None, time.perf_counter() - start
     else:
-        return np.mean(losses), time.perf_counter() - start
+        return np.mean(az_range_losses), time.perf_counter() - start
 
 
-def plot_scatter(x):
-    fig = plt.figure(figsize=[10, 10])
-    ax = fig.add_subplot(1, 1, 1)
-    ax.axis([-165, 165, -165, 165])
-    for i in range(x.shape[0]):
-        ax.plot(x[i, :, 0], x[i, :, 1], '.')
-    return fig
-
-
-def plot_trajectory(x):
-    fig = plt.figure(figsize=[10, 10])
-    ax = fig.add_subplot(1, 1, 1)
-    ax.axis([-165, 165, -165, 165])
-    for i in range(x.shape[0]):
-        ax.plot(x[i, :, 0], x[i, :, 1])
-    return fig
-
-
-def plot_acc(a, a_max=None):
-    fig, ax = plt.subplots(2, sharex=True)
-    for i in range(a.shape[0]):
-        ax[0].plot(a[i, :, 0])
-        ax[1].plot(a[i, :, 1])
-    if a_max is not None:
-        limit = np.ones(a.shape[1]) * a_max
-        ax[1].plot(limit, color='red')
-        ax[1].plot(-limit, color='red')
-        ax[0].plot(limit, color='red')
-        ax[0].plot(-limit, color='red')
-    return fig
-
-
-def visualize(args, epoch, model, data_loader, writer):
+def visualize(args, epoch, model, data_loader, writer, steering_dict):
     def save_image(image, tag):
+        image = Tensor(cartesian2polar(image)).unsqueeze(1)
         image -= image.min()
         image /= image.max()
         grid = torchvision.utils.make_grid(image, nrow=4, pad_value=1)
@@ -284,33 +153,46 @@ def visualize(args, epoch, model, data_loader, writer):
     model.eval()
     with torch.no_grad():
         for iter, data in enumerate(data_loader):
-            input, target, mean, std, norm = data
-            input = input.to(args.device)
-            target = target.unsqueeze(1).to(args.device)
+            smat_target, mean, std = data
+            smat_target = smat_target.to(args.device)
 
-            save_image(target, 'Target')
+            ind = [True if txrx[0] in rx_low else False for txrx in steering_dict['TxRxPairs']]
+            smat_low = smat_target[:, ind, :]
+
+            smat_target = unnormalize_complex(smat_target, mean, std)
+            AzRange_target = beamforming(smat_target, steering_dict, args)
+
             if epoch != 0:
-                output = model(input.clone())
-                # output = transforms.complex_abs(output)  # complex to real
-                # output = transforms.root_sum_of_squares(output, dim=1).unsqueeze(1)
+                smat_rec = model(smat_low)
+                smat_rec = unnormalize_complex(smat_rec, mean, std)
+                AzRange_reconstruction = beamforming(smat_rec, steering_dict, args)
+                # save_image(AzRange_reconstruction, 'AzRange_reconstruction')
+                writer.add_figure('AzRange_reconstruction0',
+                                  polar_plot(AzRange_reconstruction, steering_dict, args), epoch)
+                error = abs(AzRange_reconstruction - AzRange_target)
+                # save_image(error, 'Error')
+                writer.add_figure('Error0', polar_plot(-error, steering_dict, args), epoch)
+                # writer.add_image('Smat_rec0', abs(smat_rec[0]).unsqueeze(0), epoch)
+            else:
+                smat_low = unnormalize_complex(smat_low, mean, std)
+                steering_dict_low = steering_dict.copy()
+                steering_dict_low['H'] = steering_dict['H'][ind]
+                AzRange_corrupted = beamforming(smat_low, steering_dict_low, args)
+                # save_image(AzRange_target, 'AzRange_target')
+                # save_image(AzRange_corrupted, 'AzRange_corrupted')
+                writer.add_figure('AzRange_target0', polar_plot(AzRange_target, steering_dict, args), epoch)
+                writer.add_figure('AzRange_corrupted0', polar_plot(AzRange_corrupted, steering_dict, args), epoch)
+                # writer.add_image('Smat_traget0', abs(smat_target[0]).unsqueeze(0), epoch)
 
-                corrupted = model.module.subsampling(input)
-                corrupted = corrupted[..., 0]  # complex to real
-                cor_all = transforms.root_sum_of_squares(corrupted,dim=1).unsqueeze(1)
-
-                save_image(output, 'Reconstruction')
-                save_image(corrupted[:, 0:1, :, :], 'Corrupted0')
-                save_image(corrupted[:, 1:2, :, :], 'Corrupted1')
-                save_image(cor_all, 'Corrupted')
-                save_image(torch.abs(target - output), 'Error')
             break
 
 
-def save_model(args, exp_dir, epoch, model, optimizer, best_dev_loss, is_new_best):
+def save_model(args, exp_dir, epoch, model, optimizer, best_dev_loss, is_new_best, steering_dict):
     torch.save(
         {
             'epoch': epoch,
             'args': args,
+            'steering_dict': steering_dict,
             'model': model.state_dict(),
             'optimizer': optimizer.state_dict(),
             'best_dev_loss': best_dev_loss,
@@ -323,19 +205,12 @@ def save_model(args, exp_dir, epoch, model, optimizer, best_dev_loss, is_new_bes
 
 
 def build_model(args):
-    model = Subsampling_Model(
-        in_chans=1,
-        out_chans=1,
+    model = ResNet(
+        in_chans=len(rx_low),
+        out_chans=20,
         chans=args.num_chans,
-        num_pool_layers=args.num_pools,
+        num_blocks=args.num_pools,
         drop_prob=args.drop_prob,
-        decimation_rate=args.decimation_rate,
-        res=args.resolution,
-        trajectory_learning=args.trajectory_learning,
-        initialization=args.initialization,
-        SNR=args.SNR,
-        n_shots=args.n_shots,
-        interp_gap=args.interp_gap
     ).to(args.device)
     return model
 
@@ -343,6 +218,7 @@ def build_model(args):
 def load_model(checkpoint_file):
     checkpoint = torch.load(checkpoint_file)
     args = checkpoint['args']
+    steering_dict = checkpoint['steering_dict']
     model = build_model(args)
     if args.data_parallel:
         model = torch.nn.DataParallel(model)
@@ -354,29 +230,25 @@ def load_model(checkpoint_file):
 
 
 def build_optim(args, model):
-    optimizer = torch.optim.Adam([{'params': model.module.subsampling.parameters(), 'lr': args.sub_lr},
-                                  {'params': model.module.reconstruction_model.parameters()}], args.lr)
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     return optimizer
 
 
 def train():
-    args = create_arg_parser().parse_args()
-    args.v_max = args.gamma * args.G_max * args.FOV * args.dt
-    args.a_max = args.gamma * args.S_max * args.FOV * args.dt**2 * 1e3
-    # print(args.v_max)
-    # print(args.a_max)
-    args.exp_dir = f'summary/{args.test_name}'
+    args = create_arg_parser()
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
+    args.exp_dir = f'summary/{args.test_name}'
+    args.checkpoint = f'summary/{args.test_name}/model.pt'
     pathlib.Path(args.exp_dir).mkdir(parents=True, exist_ok=True)
     writer = SummaryWriter(log_dir=args.exp_dir)
     with open(args.exp_dir + '/args.txt', "w") as text_file:
         print(vars(args), file=text_file)
+    print(args)
 
-    args.checkpoint = f'summary/{args.test_name}/model.pt'
     if args.resume:
-        checkpoint, model, optimizer = load_model(args.checkpoint)
+        checkpoint, model, optimizer, steering_dict = load_model(args.checkpoint)
         # args = checkpoint['args']
         best_dev_loss = checkpoint['best_dev_loss']
         start_epoch = checkpoint['epoch'] + 1
@@ -388,106 +260,33 @@ def train():
         optimizer = build_optim(args, model)
         best_dev_loss = 1e9
         start_epoch = 0
-    logging.info(args)
-    # logging.info(model)
+        steering_dict = create_steering_matrix(args)
 
     train_loader, dev_loader, display_loader = create_data_loaders(args)
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, args.lr_step_size, args.lr_gamma)
-    dev_loss, dev_time = evaluate(args, 0, model, dev_loader, writer)
-    visualize(args, 0, model, display_loader, writer)
+    # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, args.lr_step_size, args.lr_gamma)
+    _, _ = evaluate(args, 0, model, dev_loader, writer, steering_dict)
+    visualize(args, 0, model, display_loader, writer, steering_dict)
 
     for epoch in range(start_epoch, args.num_epochs):
         # scheduler.step(epoch)
-        # if epoch>=args.TSP_epoch:
-        #     optimizer.param_groups[0]['lr']=0.001
-        #     optimizer.param_groups[1]['lr'] = 0.001
-        train_loss, train_time = train_epoch(args, epoch, model, train_loader, optimizer, writer)
-        dev_loss, dev_time = evaluate(args, epoch + 1, model, dev_loader, writer)
-        visualize(args, epoch + 1, model, display_loader, writer)
+        train_loss, train_time = train_epoch(args, epoch, model, train_loader, optimizer, writer, steering_dict)
+        dev_loss, dev_time = evaluate(args, epoch + 1, model, dev_loader, writer, steering_dict)
+        visualize(args, epoch + 1, model, display_loader, writer, steering_dict)
 
-        if epoch == args.TSP_epoch:
-            best_dev_loss = 1e9
         if dev_loss < best_dev_loss:
             is_new_best = True
             best_dev_loss = dev_loss
             best_epoch = epoch + 1
         else:
             is_new_best = False
-        save_model(args, args.exp_dir, epoch, model, optimizer, best_dev_loss, is_new_best)
-        logging.info(
+        save_model(args, args.exp_dir, epoch, model, optimizer, best_dev_loss, is_new_best, steering_dict)
+        print(
             f'Epoch = [{epoch:4d}/{args.num_epochs:4d}] TrainLoss = {train_loss:.4g} '
-            f'DevLoss = {dev_loss:.4g} TrainTime = {train_time:.4f}s DevTime = {dev_time:.4f}s',
+            f'ValLoss = {dev_loss:.4g} TrainTime = {train_time:.4f}s ValTime = {dev_time:.4f}s',
         )
     print(args.test_name)
-    print(f'Training done, best epoch: {best_epoch}')
+    print(f'Training done, best epoch: {best_epoch}, best DevLoss: {best_dev_loss}')
     writer.close()
-
-
-def create_arg_parser():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--data-path', type=pathlib.Path,
-                        default='/home/tomerweiss/Datasets/pd_only/',help='Path to the dataset')
-    parser.add_argument('--sample-rate', type=float, default=1.,
-                        help='Fraction of total volumes to include')
-    parser.add_argument('--test-name', type=str, default='gaussiantsp-d24-a1e-3-v1e-3', help='name for the output dir')
-    parser.add_argument('--exp-dir', type=pathlib.Path, default='summary/testepi',
-                        help='Path where model and results should be saved')
-    parser.add_argument('--resume', action='store_true',
-                        help='If set, resume the training from a previous model checkpoint. '
-                             '"--checkpoint" should be set with this')
-    parser.add_argument('--checkpoint', type=str, default='summary/test/model.pt',
-                        help='Path to an existing checkpoint. Used along with "--resume"')
-    parser.add_argument('--report-interval', type=int, default=100, help='Period of loss reporting')
-
-    # model parameters
-    parser.add_argument('--num-pools', type=int, default=4, help='Number of U-Net pooling layers')
-    parser.add_argument('--drop-prob', type=float, default=0.0, help='Dropout probability')
-    parser.add_argument('--num-chans', type=int, default=32, help='Number of U-Net channels')
-    parser.add_argument('--data-parallel', action='store_true', default=False,
-                        help='If set, use multiple GPUs using data parallelism')
-    parser.add_argument('--device', type=str, default='cuda',
-                        help='Which device to train on. Set to "cuda" to use the GPU')
-    parser.add_argument('--decimation-rate', default=10, type=int,
-                        help='Ratio of k-space columns to be sampled. If multiple values are '
-                             'provided, then one of those is chosen uniformly at random for each volume.')
-
-    # optimization parameters
-    parser.add_argument('--batch-size', default=9, type=int, help='Mini batch size')
-    parser.add_argument('--num-epochs', type=int, default=40, help='Number of training epochs')
-    parser.add_argument('--lr', type=float, default=0.001, help='Learning rate')
-    parser.add_argument('--lr-step-size', type=int, default=30,
-                        help='Period of learning rate decay')
-    parser.add_argument('--lr-gamma', type=float, default=0.01,
-                        help='Multiplicative factor of learning rate decay')
-    parser.add_argument('--weight-decay', type=float, default=0.,
-                        help='Strength of weight decay regularization')
-    parser.add_argument('--sub-lr', type=float, default=1e-1, help='lerning rate of the sub-samping layel')
-
-    # trajectory learning parameters
-    parser.add_argument('--trajectory-learning', default=True,
-                        help='trajectory_learning, if set to False, fixed trajectory, only reconstruction learning.')
-    parser.add_argument('--acc-weight', type=float, default=1e-2, help='weight of the acceleration loss')
-    parser.add_argument('--vel-weight', type=float, default=1e-1, help='weight of the velocity loss')
-    parser.add_argument('--rec-weight', type=float, default=1, help='weight of the reconstruction loss')
-    parser.add_argument('--gamma', type=float, default=42576, help='gyro magnetic ratio - kHz/T')
-    parser.add_argument('--G-max', type=float, default=40, help='maximum gradient (peak current) - mT/m')
-    parser.add_argument('--S-max', type=float, default=200, help='maximum slew-rate - T/m/s')
-    parser.add_argument('--FOV', type=float, default=0.2, help='Field Of View - in m')
-    parser.add_argument('--dt', type=float, default=1e-5, help='sampling time - sec')
-    parser.add_argument('--a-max', type=float, default=0.17, help='maximum acceleration')
-    parser.add_argument('--v-max', type=float, default=3.4, help='maximum velocity')
-    parser.add_argument('--TSP', action='store_true', default=False,
-                        help='Using the PILOT-TSP algorithm,if False using PILOT.')
-    parser.add_argument('--TSP-epoch', default=20, type=int, help='Epoch to preform the TSP reorder at')
-    parser.add_argument('--initialization', type=str, default='spiral',
-                        help='Trajectory initialization when using PILOT (spiral, EPI, rosette, uniform, gaussian).')
-    parser.add_argument('--SNR', action='store_true', default=False,
-                        help='add SNR decay')
-    parser.add_argument('--n-shots', type=int, default=8,
-                        help='Number of shots')
-    parser.add_argument('--interp_gap', type=int, default=10,
-                        help='number of interpolated points between 2 parameter points in the trajectory')
-    return parser
 
 
 if __name__ == '__main__':
