@@ -76,8 +76,11 @@ def train_epoch(args, epoch, model, data_loader, optimizer, writer, steering_dic
     start_epoch = time.perf_counter()
     global_step = epoch * len(data_loader)
     for iter, data in enumerate(data_loader):
+        start_iter = time.perf_counter()
         (smat_target, mean, std), elevation = data
         smat_target = smat_target.to(args.device)
+        mean = mean.to(args.device)
+        std = std.to(args.device)
         smat_target = unnormalize_complex(smat_target, mean, std)
         AzRange_target = beamforming(smat_target, steering_dict, args, elevation)
         AzRange_target, mean, std = normalize_instance(AzRange_target)
@@ -104,7 +107,7 @@ def train_epoch(args, epoch, model, data_loader, optimizer, writer, steering_dic
                 f'Epoch = [{epoch:3d}/{args.num_epochs:3d}] '
                 f'Iter = [{iter:4d}/{len(data_loader):4d}] '
                 f'Loss = {loss.item():.4g} Avg Loss = {avg_loss:.4g} '
-                f'AzRange Loss = {az_range_loss:.4g} ')
+                f'AzRange Loss = {az_range_loss:.4g}, Time = {time.perf_counter() - start_iter}')
     return avg_loss, time.perf_counter() - start_epoch
 
 
@@ -117,6 +120,8 @@ def evaluate(args, epoch, model, data_loader, writer, steering_dict):
             for iter, data in enumerate(data_loader):
                 (smat_target, mean, std), elevation = data
                 smat_target = smat_target.to(args.device)
+                mean = mean.to(args.device)
+                std = std.to(args.device)
                 smat_target = unnormalize_complex(smat_target, mean, std)
                 AzRange_target = beamforming(smat_target, steering_dict, args, elevation)
                 AzRange_target, mean, std = normalize_instance(AzRange_target)
@@ -154,6 +159,8 @@ def visualize(args, epoch, model, data_loader, writer, steering_dict):
         for iter, data in enumerate(data_loader):
             (smat_target, mean, std), elevation = data
             smat_target = smat_target.to(args.device)
+            mean = mean.to(args.device)
+            std = std.to(args.device)
             smat_target = unnormalize_complex(smat_target, mean, std)
             AzRange_target = beamforming(smat_target, steering_dict, args, elevation)
             AzRange_target, mean, std = normalize_instance(AzRange_target)

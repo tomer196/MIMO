@@ -77,6 +77,8 @@ def train_epoch(args, epoch, model, data_loader, optimizer, writer, steering_dic
     for iter, data in enumerate(data_loader):
         (smat_target, mean, std), elevation = data
         smat_target = smat_target.to(args.device)
+        mean = mean.to(args.device)
+        std = std.to(args.device)
 
         ind = [True if txrx[0] in rx_low else False for txrx in steering_dict['TxRxPairs']]
         smat_low = smat_target[:, ind, :]
@@ -117,6 +119,8 @@ def evaluate(args, epoch, model, data_loader, writer, steering_dict):
             for iter, data in enumerate(data_loader):
                 (smat_target, mean, std), elevation = data
                 smat_target = smat_target.to(args.device)
+                mean = mean.to(args.device)
+                std = std.to(args.device)
 
                 ind = [True if txrx[0] in rx_low else False for txrx in steering_dict['TxRxPairs']]
                 smat_low = smat_target[:, ind, :]
@@ -156,6 +160,8 @@ def visualize(args, epoch, model, data_loader, writer, steering_dict):
         for iter, data in enumerate(data_loader):
             (smat_target, mean, std), elevation = data
             smat_target = smat_target.to(args.device)
+            mean = mean.to(args.device)
+            std = std.to(args.device)
 
             ind = [True if txrx[0] in rx_low else False for txrx in steering_dict['TxRxPairs']]
             smat_low = smat_target[:, ind, :]

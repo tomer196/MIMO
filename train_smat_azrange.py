@@ -3,7 +3,7 @@ import random
 import shutil
 import time
 import os
-# os.environ["CUDA_VISIBLE_DEVICES"] = "6"
+# os.environ["CUDA_VISIBLE_DEVICES"] = "4"
 import sys
 
 # sys.path.insert(0, '/Users/tomer/OneDrive - Technion/Desktop/Teachnion/RF/MIMO')
@@ -78,6 +78,8 @@ def train_epoch(args, epoch, model, data_loader, optimizer, writer, steering_dic
     for iter, data in enumerate(data_loader):
         (smat_target, smat_mean, smat_std), elevation = data
         smat_target = smat_target.to(args.device)
+        smat_mean = smat_mean.to(args.device)
+        smat_std = smat_std.to(args.device)
 
         ind = [True if txrx[0] in rx_low else False for txrx in steering_dict['TxRxPairs']]
         smat_low = smat_target[:, ind, :]
@@ -116,6 +118,8 @@ def evaluate(args, epoch, model, data_loader, writer, steering_dict):
             for iter, data in enumerate(data_loader):
                 (smat_target, smat_mean, smat_std), elevation = data
                 smat_target = smat_target.to(args.device)
+                smat_mean = smat_mean.to(args.device)
+                smat_std = smat_std.to(args.device)
 
                 ind = [True if txrx[0] in rx_low else False for txrx in steering_dict['TxRxPairs']]
                 smat_low = smat_target[:, ind, :]
@@ -152,6 +156,8 @@ def visualize(args, epoch, model, data_loader, writer, steering_dict):
         for iter, data in enumerate(data_loader):
             (smat_target, smat_mean, smat_std), elevation = data
             smat_target = smat_target.to(args.device)
+            smat_mean = smat_mean.to(args.device)
+            smat_std = smat_std.to(args.device)
 
             ind = [True if txrx[0] in rx_low else False for txrx in steering_dict['TxRxPairs']]
             smat_low = smat_target[:, ind, :]

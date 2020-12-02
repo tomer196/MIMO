@@ -6,10 +6,11 @@ import matplotlib.pyplot as plt
 import scipy.io as sio
 from torch import asin, linspace, Tensor, zeros, meshgrid, exp, complex, log10, abs, mean, max, arange, cfloat, atan, \
     sqrt, cat, view_as_real, view_as_complex
+from torch import sin as sin_th
 from torch.fft import fft, ifft
 from torch.nn.functional import interpolate, grid_sample
 import torch.nn.functional as F
-from numpy import pi, sin, arcsin, deg2rad, rad2deg
+from numpy import pi, sin, deg2rad, rad2deg
 import numpy as nan
 import argparse
 import pathlib
@@ -17,6 +18,7 @@ import numpy as np
 
 
 def cartesian2polar(rangeAzMap_db):
+    rangeAzMap_db = rangeAzMap_db.detach().cpu()
     if len(rangeAzMap_db) == 2:
         cartesianImage, _ = polarTransform.convertToCartesianImage(
             rangeAzMap_db.T, center='bottom-middle', initialRadius=None, finalRadius=None,
@@ -140,21 +142,23 @@ def create_steering_matrix_elvation0(args):
 
 
 def create_steering_matrix(args):
-    ants_locations = Tensor(sio.loadmat('ants_location.mat')['VtrigU_ants_location'])
-    freqs = linspace(args.freq_start, args.freq_stop, args.freq_points) * 1e9
+    ants_locations = Tensor(sio.loadmat('ants_location.mat')['VtrigU_ants_location']).to(args.device)
+    freqs = linspace(args.freq_start, args.freq_stop, args.freq_points).to(args.device) * 1e9
     n_tx = 20
     n_rx = 20
     start_angle = 60
     num_pairs = n_tx * n_rx
-    TxRxPairs = zeros(num_pairs, 2).long()
+    TxRxPairs = zeros(num_pairs, 2).long().to(args.device)
     for i in range(n_tx):
         for j in range(n_rx):
             TxRxPairs[i * n_tx + j, 0] = i
             TxRxPairs[i * n_tx + j, 1] = j + 20
-    theta_vec = asin(linspace(sin(deg2rad(-start_angle)), sin(deg2rad(start_angle)), args.numOfDigitalBeams))  # Azimuth
-    phi_vec = asin(linspace(sin(deg2rad(-start_angle)), sin(deg2rad(start_angle)), args.numOfDigitalBeams))  # Elevation
+    a1 = sin(deg2rad(-start_angle))
+    a2 = sin(deg2rad(start_angle))
+    theta_vec = asin(linspace(a1, a2, args.numOfDigitalBeams)).to(args.device)  # Azimuth
+    phi_vec = asin(linspace(a1, a2, args.numOfDigitalBeams)).to(args.device)  # Elevation
 
-    taylor_win = Tensor(sio.loadmat('taylorwin.mat')['taylor_win']).squeeze()
+    taylor_win = Tensor(sio.loadmat('taylorwin.mat')['taylor_win']).squeeze().to(args.device)
     taylor_win_El = taylor_win.repeat(args.freq_points, n_tx).T
     taylor_win_Az = taylor_win.repeat_interleave(n_tx).unsqueeze(1).repeat(1, args.freq_points)
 
@@ -173,11 +177,11 @@ def create_steering_matrix(args):
     #                                                    K_vec_y.unsqueeze(0) * D[:, 1].unsqueeze(1))))
     #     H[:, :, beam_idx] = H[:, :, beam_idx] * taylor_win_El * taylor_win_Az
 
-    K_vec_x = freqs.unsqueeze(1) * sin(theta_vec).unsqueeze(0) / 3e8
-    K_vec_y = freqs.unsqueeze(1) * sin(phi_vec).unsqueeze(0) / 3e8
+    K_vec_x = freqs.unsqueeze(1) * sin_th(theta_vec).unsqueeze(0) / 3e8
+    K_vec_y = freqs.unsqueeze(1) * sin_th(phi_vec).unsqueeze(0) / 3e8
     D = ants_locations[TxRxPairs[:, 0], :] + ants_locations[TxRxPairs[:, 1], :]
     # H shape (antennas, freq_points, azimuth, elevation)
-    H = exp(complex(real=Tensor([0]), imag=2 * pi * (
+    H = exp(complex(real=Tensor([0]).to(args.device), imag=2 * pi * (
             (K_vec_x.unsqueeze(0) * D[:, 0].unsqueeze(1).unsqueeze(2)).unsqueeze(3) +
             (K_vec_y.unsqueeze(0) * D[:, 1].unsqueeze(1).unsqueeze(2)).unsqueeze(2))))
     H = H * taylor_win_El.unsqueeze(2).unsqueeze(3) * taylor_win_Az.unsqueeze(2).unsqueeze(3)
@@ -272,7 +276,7 @@ def create_arg_parser():
     parser.add_argument('--num-chans', type=int, default=32, help='Number of U-Net channels')
     parser.add_argument('--data-parallel', action='store_true', default=False,
                         help='If set, use multiple GPUs using data parallelism')
-    parser.add_argument('--device', type=str, default='cpu',
+    parser.add_argument('--device', type=str, default='cuda',
                         help='Which device to train on. Set to "cuda" to use the GPU')
     parser.add_argument('--num-workers', type=int, default=0, help='Number of data loader workers')
 
@@ -282,7 +286,7 @@ def create_arg_parser():
 
     # optimization parameters
     parser.add_argument('--sample-rate', type=float, default=1, help='Sample rate')
-    parser.add_argument('--batch-size', default=9, type=int, help='Mini batch size')
+    parser.add_argument('--batch-size', default=64, type=int, help='Mini batch size')
     parser.add_argument('--num-epochs', type=int, default=40, help='Number of training epochs')
     parser.add_argument('--lr', type=float, default=1e-4, help='Learning rate')
     parser.add_argument('--freq-start', type=int, default=62, help='GHz')
