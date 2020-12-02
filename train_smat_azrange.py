@@ -76,14 +76,14 @@ def train_epoch(args, epoch, model, data_loader, optimizer, writer, steering_dic
     start_epoch = time.perf_counter()
     global_step = epoch * len(data_loader)
     for iter, data in enumerate(data_loader):
-        smat_target, smat_mean, smat_std = data
+        (smat_target, smat_mean, smat_std), elevation = data
         smat_target = smat_target.to(args.device)
 
         ind = [True if txrx[0] in rx_low else False for txrx in steering_dict['TxRxPairs']]
         smat_low = smat_target[:, ind, :]
 
         smat_target = unnormalize_complex(smat_target, smat_mean, smat_std)
-        AzRange_target = beamforming(smat_target, steering_dict, args)
+        AzRange_target = beamforming(smat_target, steering_dict, args, elevation)
         AzRange_target, azrange_mean, azrange_std = normalize_instance(AzRange_target)
 
         AzRange_rec = model(smat_low, smat_mean, smat_std, azrange_mean, azrange_std,
@@ -114,14 +114,14 @@ def evaluate(args, epoch, model, data_loader, writer, steering_dict):
     with torch.no_grad():
         if epoch != 0:
             for iter, data in enumerate(data_loader):
-                smat_target, smat_mean, smat_std = data
+                (smat_target, smat_mean, smat_std), elevation = data
                 smat_target = smat_target.to(args.device)
 
                 ind = [True if txrx[0] in rx_low else False for txrx in steering_dict['TxRxPairs']]
                 smat_low = smat_target[:, ind, :]
 
                 smat_target = unnormalize_complex(smat_target, smat_mean, smat_std)
-                AzRange_target = beamforming(smat_target, steering_dict, args)
+                AzRange_target = beamforming(smat_target, steering_dict, args, elevation)
                 AzRange_target, azrange_mean, azrange_std = normalize_instance(AzRange_target)
 
                 AzRange_rec = model(smat_low, smat_mean, smat_std, azrange_mean, azrange_std,
@@ -150,14 +150,14 @@ def visualize(args, epoch, model, data_loader, writer, steering_dict):
     model.eval()
     with torch.no_grad():
         for iter, data in enumerate(data_loader):
-            smat_target, smat_mean, smat_std = data
+            (smat_target, smat_mean, smat_std), elevation = data
             smat_target = smat_target.to(args.device)
 
             ind = [True if txrx[0] in rx_low else False for txrx in steering_dict['TxRxPairs']]
             smat_low = smat_target[:, ind, :]
 
             smat_target = unnormalize_complex(smat_target, smat_mean, smat_std)
-            AzRange_target = beamforming(smat_target, steering_dict, args)
+            AzRange_target = beamforming(smat_target, steering_dict, args, elevation)
             AzRange_target, azrange_mean, azrange_std = normalize_instance(AzRange_target)
             AzRange_target = unnormalize(AzRange_target, azrange_mean, azrange_std)
 
@@ -176,7 +176,7 @@ def visualize(args, epoch, model, data_loader, writer, steering_dict):
                 smat_low = unnormalize_complex(smat_low, smat_mean, smat_std)
                 steering_dict_low = steering_dict.copy()
                 steering_dict_low['H'] = steering_dict['H'][ind]
-                AzRange_corrupted = beamforming(smat_low, steering_dict_low, args)
+                AzRange_corrupted = beamforming(smat_low, steering_dict_low, args, elevation)
                 # save_image(AzRange_target, 'AzRange_target')
                 # save_image(AzRange_corrupted, 'AzRange_corrupted')
                 writer.add_figure('AzRange_target0', polar_plot(AzRange_target, steering_dict, args), epoch)

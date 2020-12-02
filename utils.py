@@ -91,7 +91,7 @@ def plot_beampatern(steering_dict):
     plt.show()
 
 
-def create_steering_matrix(args):
+def create_steering_matrix_elvation0(args):
     ants_locations = Tensor(sio.loadmat('ants_location.mat')['VtrigU_ants_location'])
     freqs = linspace(args.freq_start, args.freq_stop, args.freq_points) * 1e9
     n_tx = 20
@@ -128,8 +128,10 @@ def create_steering_matrix(args):
     K_vec_x = freqs.unsqueeze(1) * sin(theta_vec).unsqueeze(0) / 3e8
     K_vec_y = freqs * sin(phi_s) / 3e8
     D = ants_locations[TxRxPairs[:, 0], :] + ants_locations[TxRxPairs[:, 1], :]
-    H = exp(complex(real=Tensor([0]), imag=2 * pi * (K_vec_x.unsqueeze(0) * D[:, 0].unsqueeze(1).unsqueeze(2) +
-                                                     (K_vec_y.unsqueeze(0) * D[:, 1].unsqueeze(1)).unsqueeze(2))))
+    # H shape (antennas, freq_points, azimuth, elevation)
+    H = exp(complex(real=Tensor([0]), imag=2 * pi * (
+            K_vec_x.unsqueeze(0) * D[:, 0].unsqueeze(1).unsqueeze(2) +
+            (K_vec_y.unsqueeze(0) * D[:, 1].unsqueeze(1)).unsqueeze(2))))
     H = H * taylor_win_El.unsqueeze(2) * taylor_win_Az.unsqueeze(2)
     return {'H': H,
             'ants_locations': ants_locations,
@@ -137,15 +139,62 @@ def create_steering_matrix(args):
             'TxRxPairs': TxRxPairs}
 
 
-def beamforming(Smat, steering_dict, args):
+def create_steering_matrix(args):
+    ants_locations = Tensor(sio.loadmat('ants_location.mat')['VtrigU_ants_location'])
+    freqs = linspace(args.freq_start, args.freq_stop, args.freq_points) * 1e9
+    n_tx = 20
+    n_rx = 20
+    start_angle = 60
+    num_pairs = n_tx * n_rx
+    TxRxPairs = zeros(num_pairs, 2).long()
+    for i in range(n_tx):
+        for j in range(n_rx):
+            TxRxPairs[i * n_tx + j, 0] = i
+            TxRxPairs[i * n_tx + j, 1] = j + 20
+    theta_vec = asin(linspace(sin(deg2rad(-start_angle)), sin(deg2rad(start_angle)), args.numOfDigitalBeams))  # Azimuth
+    phi_vec = asin(linspace(sin(deg2rad(-start_angle)), sin(deg2rad(start_angle)), args.numOfDigitalBeams))  # Elevation
+
+    taylor_win = Tensor(sio.loadmat('taylorwin.mat')['taylor_win']).squeeze()
+    taylor_win_El = taylor_win.repeat(args.freq_points, n_tx).T
+    taylor_win_Az = taylor_win.repeat_interleave(n_tx).unsqueeze(1).repeat(1, args.freq_points)
+
+    # H = zeros(num_pairs, args.freq_points, args.numOfDigitalBeams, dtype=cfloat)
+    # for beam_idx in range(args.numOfDigitalBeams):
+    #     theta = theta_vec[beam_idx]
+    #     K_vec_x = freqs * sin(theta) / 3e8
+    #     K_vec_y = freqs * sin(phi_s) / 3e8
+    #
+    #     # for ii in range(num_pairs):
+    #     #     D = ants_locations[TxRxPairs[ii, 0], :] + ants_locations[TxRxPairs[ii, 1], :]
+    #     #     H[ii, :, beam_idx] = exp(complex(real=Tensor([0]), imag=2 * pi * (K_vec_x * D[0] + K_vec_y * D[1])))
+    #     D = ants_locations[TxRxPairs[:, 0], :] + ants_locations[TxRxPairs[:, 1], :]
+    #     H[:, :, beam_idx] = exp(complex(real=Tensor([0]),
+    #                                     imag=2 * pi * (K_vec_x.unsqueeze(0) * D[:, 0].unsqueeze(1) +
+    #                                                    K_vec_y.unsqueeze(0) * D[:, 1].unsqueeze(1))))
+    #     H[:, :, beam_idx] = H[:, :, beam_idx] * taylor_win_El * taylor_win_Az
+
+    K_vec_x = freqs.unsqueeze(1) * sin(theta_vec).unsqueeze(0) / 3e8
+    K_vec_y = freqs.unsqueeze(1) * sin(phi_vec).unsqueeze(0) / 3e8
+    D = ants_locations[TxRxPairs[:, 0], :] + ants_locations[TxRxPairs[:, 1], :]
+    # H shape (antennas, freq_points, azimuth, elevation)
+    H = exp(complex(real=Tensor([0]), imag=2 * pi * (
+            (K_vec_x.unsqueeze(0) * D[:, 0].unsqueeze(1).unsqueeze(2)).unsqueeze(3) +
+            (K_vec_y.unsqueeze(0) * D[:, 1].unsqueeze(1).unsqueeze(2)).unsqueeze(2))))
+    H = H * taylor_win_El.unsqueeze(2).unsqueeze(3) * taylor_win_Az.unsqueeze(2).unsqueeze(3)
+    return {'H': H,
+            'ants_locations': ants_locations,
+            'freqs': freqs,
+            'TxRxPairs': TxRxPairs}
+
+
+def beamforming(Smat, steering_dict, args, elevation_ind=[16]):
     # rangeAzMap = zeros(args.Nfft // 2, args.numOfDigitalBeams, dtype=cfloat)
     # for beam_idx in range(args.numOfDigitalBeams):
     #     BR_response = ifft(mean(H[:, :, beam_idx]*Smat, dim=0), n=args.Nfft)
     #     rangeAzMap[:, beam_idx] = BR_response[:args.Nfft // 2]
-    H = steering_dict['H']
+    H = steering_dict['H'][..., elevation_ind].permute(3, 0, 1, 2)
     if len(Smat.shape) == 2:  # batch dim
         Smat = Smat.unsqueeze(0)
-    H = H.unsqueeze(0)
     BR_response = ifft(complex_mean(H*Smat.unsqueeze(-1), dim=1), n=args.Nfft, dim=1)
     rangeAzMap = BR_response[:, :args.Nfft // 2, :]
     rangeAzMap_db = 20 * log10(abs(rangeAzMap) / max(abs(rangeAzMap)))
