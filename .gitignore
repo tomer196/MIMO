@@ -1,5 +1,6 @@
 Data/
 Raw_data/
+summary/
 .idea/
 .DS_store
 __pycache__/

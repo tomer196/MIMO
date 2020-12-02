@@ -156,9 +156,9 @@ def complex_mse(input, target):
     return F.mse_loss(view_as_real(input), view_as_real(target))
 
 
-def az_range_mse(input, target, d=0.1):
+def az_range_mse(input, target, d=0.15):
     length = int(input.shape[1] * (1 - d))
-    return F.mse_loss(input[:, :length, :], target[:, :length, :])
+    return F.mse_loss(input[:, length:, :], target[:, length:, :])
 
 
 def complex_mean(input, dim):
@@ -193,10 +193,24 @@ def normalize_complex(data, eps=0.):
     return view_as_complex(real_data), mean, std
 
 
+def normalize(data, mean, stddev, eps=0.):
+    return (data - mean) / (stddev + eps)
+
+
+def normalize_instance(data, eps=0.):
+    mean = data.mean(dim=(-2, -1), keepdim=True)
+    std = data.std(dim=(-2, -1), keepdim=True)
+    return normalize(data, mean, std, eps), mean, std
+
+
+def unnormalize(data, mean, std, eps=0.):
+    return data * (std + eps) + mean
+
+
 def create_arg_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('--seed', type=int, default=0, help='Random seed')
-    parser.add_argument('--test-name', type=str, default='test_resnet_az', help='Test name')
+    parser.add_argument('--test-name', type=str, default='az_1e-4_train', help='Test name')
     parser.add_argument('--resume', action='store_true',
                         help='If set, resume the training from a previous model checkpoint. '
                              '"--checkpoint" should be set with this')
@@ -218,7 +232,7 @@ def create_arg_parser():
     #                     help='Path where model and results should be saved')
 
     # optimization parameters
-    parser.add_argument('--sample-rate', type=float, default=1., help='Sample rate')
+    parser.add_argument('--sample-rate', type=float, default=1, help='Sample rate')
     parser.add_argument('--batch-size', default=9, type=int, help='Mini batch size')
     parser.add_argument('--num-epochs', type=int, default=40, help='Number of training epochs')
     parser.add_argument('--lr', type=float, default=1e-4, help='Learning rate')

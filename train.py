@@ -24,10 +24,11 @@ import matplotlib.pyplot as plt
 import scipy.io as sio
 from models.complex_unet import ComplexUnetModel
 from models.complex_cnn import ComplexCNNModel
+from models.complex_cnn_1d import ComplexCNN1DModel
 from models.complex_resnet import ResNet
 from utils import *
 
-rx_low = [0, 2, 4, 6, 8, 10, 12, 14, 16, 18]
+rx_low = [0,1, 2, 4,5, 6, 8,9, 10, 12,13, 14, 16,17, 18]
 
 
 def create_datasets(args):
@@ -90,7 +91,7 @@ def train_epoch(args, epoch, model, data_loader, optimizer, writer, steering_dic
         AzRange_target = beamforming(smat_target, steering_dict, args)
         az_range_loss = az_range_mse(AzRange_rec, AzRange_target)
 
-        loss = az_range_loss
+        loss = smat_loss
         loss.backward()
         optimizer.step()
 
@@ -139,7 +140,7 @@ def evaluate(args, epoch, model, data_loader, writer, steering_dict):
     if epoch == 0:
         return None, time.perf_counter() - start
     else:
-        return np.mean(az_range_losses), time.perf_counter() - start
+        return np.mean(smat_losses), time.perf_counter() - start
 
 
 def visualize(args, epoch, model, data_loader, writer, steering_dict):
@@ -205,7 +206,7 @@ def save_model(args, exp_dir, epoch, model, optimizer, best_dev_loss, is_new_bes
 
 
 def build_model(args):
-    model = ResNet(
+    model = ComplexCNN1DModel(
         in_chans=len(rx_low),
         out_chans=20,
         chans=args.num_chans,
@@ -226,7 +227,7 @@ def load_model(checkpoint_file):
 
     optimizer = build_optim(args, model)
     optimizer.load_state_dict(checkpoint['optimizer'])
-    return checkpoint, model, optimizer
+    return checkpoint, model, optimizer, steering_dict
 
 
 def build_optim(args, model):
@@ -285,7 +286,7 @@ def train():
             f'ValLoss = {dev_loss:.4g} TrainTime = {train_time:.4f}s ValTime = {dev_time:.4f}s',
         )
     print(args.test_name)
-    print(f'Training done, best epoch: {best_epoch}, best DevLoss: {best_dev_loss}')
+    print(f'Training done, best epoch: {best_epoch}, best ValLoss: {best_dev_loss}')
     writer.close()
 
 
