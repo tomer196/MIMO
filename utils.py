@@ -5,7 +5,7 @@ import polarTransform
 import matplotlib.pyplot as plt
 import scipy.io as sio
 from torch import asin, linspace, Tensor, zeros, meshgrid, exp, complex, log10, abs, mean, max, arange, cfloat, atan, \
-    sqrt, cat, view_as_real, view_as_complex
+    sqrt, cat, view_as_real, view_as_complex, sum, log
 from torch import sin as sin_th
 from torch.fft import fft, ifft
 from torch.nn.functional import interpolate, grid_sample
@@ -211,7 +211,8 @@ def complex_mse(input, target):
 
 def az_range_mse(input, target, d=0.15):
     length = int(input.shape[1] * (1 - d))
-    return F.mse_loss(input[:, length:, :], target[:, length:, :])
+    # return F.mse_loss(input[:, length:, :], target[:, length:, :])
+    return mean(log((input[:, length:, :]-target[:, length:, :])**2))
 
 
 def complex_mean(input, dim):
@@ -263,7 +264,7 @@ def unnormalize(data, mean, std, eps=0.):
 def create_arg_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('--seed', type=int, default=0, help='Random seed')
-    parser.add_argument('--test-name', type=str, default='az_1e-4_train', help='Test name')
+    parser.add_argument('--test-name', type=str, default='az_1e-5_15-17_all_log', help='Test name')
     parser.add_argument('--resume', action='store_true',
                         help='If set, resume the training from a previous model checkpoint. '
                              '"--checkpoint" should be set with this')
@@ -288,7 +289,7 @@ def create_arg_parser():
     parser.add_argument('--sample-rate', type=float, default=1, help='Sample rate')
     parser.add_argument('--batch-size', default=64, type=int, help='Mini batch size')
     parser.add_argument('--num-epochs', type=int, default=40, help='Number of training epochs')
-    parser.add_argument('--lr', type=float, default=1e-4, help='Learning rate')
+    parser.add_argument('--lr', type=float, default=1e-5, help='Learning rate')
     parser.add_argument('--freq-start', type=int, default=62, help='GHz')
     parser.add_argument('--freq-stop', type=int, default=69, help='GHz')
     parser.add_argument('--freq-points', type=int, default=75, help='Number of freqs points')

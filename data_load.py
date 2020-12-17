@@ -7,13 +7,14 @@ from utils import normalize_complex
 
 
 class SmatData(Dataset):
-    def __init__(self, root, sample_rate=1):
+    def __init__(self, root, sample_rate=1, slice_range=None):
+        slice_range = slice_range if slice_range is not None else (16, 17)
         self.slices = []
         root = os.getcwd() + root
         for current_dir, sub_dirs, files in os.walk(root):
             for name in files:
                 if name.endswith(".h5") and not current_dir.endswith('cars'):
-                    for elevation in range(5, 25):
+                    for elevation in range(slice_range[0], slice_range[1]):
                         self.slices.append((current_dir + '/' + name, elevation))
         if sample_rate < 1:
             random.shuffle(self.slices)

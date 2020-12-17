@@ -19,7 +19,7 @@ import torchvision
 from data_load import SmatData
 
 import matplotlib
-# matplotlib.use('Agg')
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import scipy.io as sio
 from models.unet import UnetModel, UniModel

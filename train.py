@@ -3,7 +3,7 @@ import random
 import shutil
 import time
 import os
-# os.environ["CUDA_VISIBLE_DEVICES"] = "6"
+    # os.environ["CUDA_VISIBLE_DEVICES"] = "6"
 import sys
 
 # sys.path.insert(0, '/Users/tomer/OneDrive - Technion/Desktop/Teachnion/RF/MIMO')
@@ -19,7 +19,7 @@ import torchvision
 from data_load import SmatData
 
 import matplotlib
-# matplotlib.use('Agg')
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import scipy.io as sio
 from models.complex_unet import ComplexUnetModel

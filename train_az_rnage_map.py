@@ -19,7 +19,7 @@ import torchvision
 from data_load import SmatData
 
 import matplotlib
-# matplotlib.use('Agg')
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import scipy.io as sio
 from models.unet import UnetModel
@@ -29,13 +29,15 @@ from models.complex_cnn_1d import ComplexCNN1DModel
 from models.complex_resnet import ResNet
 from utils import *
 
-rx_low = [0,1, 2, 4,5, 6, 8,9, 10, 12,13, 14, 16,17, 18]
+# rx_low = [0,1, 2, 4,5, 6, 8,9, 10, 12,13, 14, 16,17, 18]
+rx_low = list(range(20))
 
 
 def create_datasets(args):
     train_data = SmatData(
         root=args.data_path + 'Training',
-        sample_rate=args.sample_rate
+        sample_rate=args.sample_rate,
+        slice_range=(15, 17)
     )
     val_data = SmatData(
         root=args.data_path + 'Validation',
