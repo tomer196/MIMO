@@ -210,7 +210,7 @@ def save_model(args, exp_dir, epoch, model, optimizer, best_dev_loss, is_new_bes
 def create_arg_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('--seed', type=int, default=0, help='Random seed')
-    parser.add_argument('--test-name', type=str, default='az_range_1e-4', help='Test name')
+    parser.add_argument('--test-name', type=str, default='az_range_1e-5', help='Test name')
     parser.add_argument('--resume', action='store_true',
                         help='If set, resume the training from a previous model checkpoint. '
                              '"--checkpoint" should be set with this')
@@ -234,8 +234,8 @@ def create_arg_parser():
     # optimization parameters
     parser.add_argument('--sample-rate', type=float, default=1, help='Sample rate')
     parser.add_argument('--batch-size', default=64, type=int, help='Mini batch size')
-    parser.add_argument('--num-epochs', type=int, default=1000, help='Number of training epochs')
-    parser.add_argument('--lr', type=float, default=1e-4, help='Learning rate')
+    parser.add_argument('--num-epochs', type=int, default=100, help='Number of training epochs')
+    parser.add_argument('--lr', type=float, default=1e-5, help='Learning rate')
     parser.add_argument('--freq-start', type=int, default=62, help='GHz')
     parser.add_argument('--freq-stop', type=int, default=69, help='GHz')
     parser.add_argument('--freq-points', type=int, default=75, help='Number of freqs points')
