@@ -3,7 +3,7 @@ from torch.nn import Parameter, Module
 from torch.fft import ifft
 from models.unet import UnetModel
 from torch.autograd import Function
-from utils import beamforming, complex_mean
+from utils import *
 
 
 class SelectionUnetModel(Module):
@@ -40,7 +40,7 @@ class SelectionUnetModel(Module):
         # self.momentum = 0.9
 
 
-    def forward(self, smat, steering_dict, args, elevation):
+    def forward(self, smat, steering_dict, args, elevation, mean, std):
         self.selection()
         H = steering_dict['H'][..., elevation].permute(3, 0, 1, 2)
         full = H * smat.unsqueeze(-1)
@@ -50,8 +50,9 @@ class SelectionUnetModel(Module):
         rangeAzMap = BR_response[:, :args.Nfft // 2, :]
         AzRange_low = 20 * log10(abs(rangeAzMap) / max(abs(rangeAzMap)))
 
-        # output = self.reconstruction(AzRange_low)
-        output = AzRange_low
+        AzRange_low = normalize(AzRange_low, mean, std)
+        output = self.reconstruction(AzRange_low)
+        # output = AzRange_low
         return output
 
     def selection(self):

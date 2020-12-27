@@ -20,7 +20,7 @@ import torch
 
 def cartesian2polar(rangeAzMap_db):
     rangeAzMap_db = rangeAzMap_db.detach().cpu()
-    if len(rangeAzMap_db) == 2:
+    if len(rangeAzMap_db.shape) == 2:
         cartesianImage, _ = polarTransform.convertToCartesianImage(
             rangeAzMap_db.T, center='bottom-middle', initialRadius=None, finalRadius=None,
             initialAngle=deg2rad(30), finalAngle=deg2rad(150), imageSize=(133, 240), hasColor=False, order=5,
@@ -54,6 +54,42 @@ def polar_plot(rangeAzMap_db, steering_dict, args, dB_Range=40):
 
     ax.set_xticklabels(f'{int(i)}' for i in linspace(-args.start_angle, args.start_angle, 5))
     ax.set_yticklabels(f'{i:.2f}' for i in linspace(0, r_max, 5))
+    plt.xlabel('Azimuth [deg]')
+    plt.ylabel('Range [m]')
+    return fig
+
+
+def polar_plot3(corrupted, rec, target, steering_dict, args, dB_Range=40):
+    Ts = 1 / args.Nfft / (steering_dict['freqs'][1] - steering_dict['freqs'][0] + 1e-16)
+    time_vector = arange(0, Ts * (args.Nfft - 1), Ts)
+    r = time_vector[:args.Nfft // 2] * 3e8 / 2
+    r_max = r[-1]
+
+    cart_corrupted = cartesian2polar(corrupted)
+    cart_rec = cartesian2polar(rec)
+    cart_target = cartesian2polar(target)
+
+    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 6))
+    cart_corrupted[cart_corrupted == 0] = None
+    ax1.imshow(cart_corrupted, origin='lower', cmap='jet', extent=[-1, 1, -1, 1], vmax=0, vmin=-dB_Range)
+    ax1.set_xticks([-1, -0.5, 0, 0.5, 1])
+    ax1.set_yticks([-1, -0.5, 0, 0.5, 1])
+    ax1.set_xticklabels(f'{int(i)}' for i in linspace(-args.start_angle, args.start_angle, 5))
+    ax1.set_yticklabels(f'{i:.2f}' for i in linspace(0, r_max, 5))
+
+    cart_rec[cart_rec == 0] = None
+    ax2.imshow(cart_rec, origin='lower', cmap='jet', extent=[-1, 1, -1, 1], vmax=0, vmin=-dB_Range)
+    ax2.set_xticks([-1, -0.5, 0, 0.5, 1])
+    ax2.set_yticks([-1, -0.5, 0, 0.5, 1])
+    ax2.set_xticklabels(f'{int(i)}' for i in linspace(-args.start_angle, args.start_angle, 5))
+    ax2.set_yticklabels(f'{i:.2f}' for i in linspace(0, r_max, 5))
+
+    cart_target[cart_target == 0] = None
+    ax3.imshow(cart_target, origin='lower', cmap='jet', extent=[-1, 1, -1, 1], vmax=0, vmin=-dB_Range)
+    ax3.set_xticks([-1, -0.5, 0, 0.5, 1])
+    ax3.set_yticks([-1, -0.5, 0, 0.5, 1])
+    ax3.set_xticklabels(f'{int(i)}' for i in linspace(-args.start_angle, args.start_angle, 5))
+    ax3.set_yticklabels(f'{i:.2f}' for i in linspace(0, r_max, 5))
     plt.xlabel('Azimuth [deg]')
     plt.ylabel('Range [m]')
     return fig
@@ -117,7 +153,7 @@ def create_steering_matrix(args):
     a1 = sin(deg2rad(-start_angle))
     a2 = sin(deg2rad(start_angle))
     theta_vec = asin(linspace(a1, a2, args.numOfDigitalBeams)).to(args.device)  # Azimuth
-    phi_vec = asin(linspace(a1, a2, args.numOfDigitalBeams)).to(args.device)  # Elevation
+    phi_vec = asin(linspace(sin(deg2rad(-5)), sin(deg2rad(5)), 5)).to(args.device)  # Elevation
 
     taylor_win = Tensor(sio.loadmat('matlab/taylorwin.mat')['taylor_win']).squeeze().to(args.device)
     taylor_win_El = taylor_win.repeat(args.freq_points, n_tx).T
@@ -152,7 +188,7 @@ def create_steering_matrix(args):
             'TxRxPairs': TxRxPairs}
 
 
-def beamforming(Smat, steering_dict, args, elevation_ind=[16]):
+def beamforming(Smat, steering_dict, args, elevation_ind=[2]):  # default elevation 0 deg
     # rangeAzMap = zeros(args.Nfft // 2, args.numOfDigitalBeams, dtype=cfloat)
     # for beam_idx in range(args.numOfDigitalBeams):
     #     BR_response = ifft(mean(H[:, :, beam_idx]*Smat, dim=0), n=args.Nfft)
@@ -210,7 +246,7 @@ def save_model(args, exp_dir, epoch, model, optimizer, best_dev_loss, is_new_bes
 def create_arg_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('--seed', type=int, default=0, help='Random seed')
-    parser.add_argument('--test-name', type=str, default='az_range_1e-5', help='Test name')
+    parser.add_argument('--test-name', type=str, default='10/learned_unet_1e-5_1e-4', help='Test name')
     parser.add_argument('--resume', action='store_true',
                         help='If set, resume the training from a previous model checkpoint. '
                              '"--checkpoint" should be set with this')
@@ -218,8 +254,8 @@ def create_arg_parser():
                         help='Path to an existing checkpoint. Used along with "--resume"')
 
     # model parameters
-    parser.add_argument('--num-pools', type=int, default=4, help='Number of U-Net pooling layers')
-    parser.add_argument('--drop-prob', type=float, default=0.0, help='Dropout probability')
+    parser.add_argument('--num-pools', type=int, default=5, help='Number of U-Net pooling layers')
+    parser.add_argument('--drop-prob', type=float, default=0, help='Dropout probability')
     parser.add_argument('--num-chans', type=int, default=32, help='Number of U-Net channels')
     parser.add_argument('--data-parallel', action='store_true', default=False,
                         help='If set, use multiple GPUs using data parallelism')
@@ -236,6 +272,7 @@ def create_arg_parser():
     parser.add_argument('--batch-size', default=64, type=int, help='Mini batch size')
     parser.add_argument('--num-epochs', type=int, default=100, help='Number of training epochs')
     parser.add_argument('--lr', type=float, default=1e-5, help='Learning rate')
+    parser.add_argument('--selection-lr', type=float, default=1e-4, help='Learning rate of the selection layer')
     parser.add_argument('--freq-start', type=int, default=62, help='GHz')
     parser.add_argument('--freq-stop', type=int, default=69, help='GHz')
     parser.add_argument('--freq-points', type=int, default=75, help='Number of freqs points')

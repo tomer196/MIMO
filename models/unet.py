@@ -26,11 +26,11 @@ class ConvBlock(nn.Module):
         self.layers = nn.Sequential(
             nn.Conv2d(in_chans, out_chans, kernel_size=3, padding=1),
             nn.InstanceNorm2d(out_chans),
-            nn.ReLU(),
+            nn.LeakyReLU(),
             nn.Dropout2d(drop_prob),
             nn.Conv2d(out_chans, out_chans, kernel_size=3, padding=1),
             nn.InstanceNorm2d(out_chans),
-            nn.ReLU(),
+            nn.LeakyReLU(),
             nn.Dropout2d(drop_prob)
         )
 

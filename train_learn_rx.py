@@ -24,13 +24,14 @@ def train_epoch(args, epoch, model, data_loader, optimizer, writer, steering_dic
         smat_target, elevation = data
         smat_target = smat_target.to(args.device)
         AzRange_target = beamforming(smat_target, steering_dict, args, elevation)
+        AzRange_target, mean, std = normalize_instance(AzRange_target)
 
-        AzRange_rec = model(smat_target, steering_dict, args, elevation)
+        AzRange_rec = model(smat_target, steering_dict, args, elevation, mean, std)
         loss = az_range_mse(AzRange_rec, AzRange_target)
 
         loss.backward()
         optimizer.step()
-        model.apply_binary_grad(1e-5)
+        model.apply_binary_grad(args.selection_lr)
 
         avg_loss = 0.99 * avg_loss + 0.01 * loss.item() if iter > 0 else loss.item()
         writer.add_scalar('TrainLoss', loss.item(), global_step + iter)
@@ -51,8 +52,9 @@ def evaluate(args, epoch, model, data_loader, writer, steering_dict):
                 smat_target, elevation = data
                 smat_target = smat_target.to(args.device)
                 AzRange_target = beamforming(smat_target, steering_dict, args, elevation)
+                AzRange_target, mean, std = normalize_instance(AzRange_target)
 
-                AzRange_rec = model(smat_target, steering_dict, args, elevation)
+                AzRange_rec = model(smat_target, steering_dict, args, elevation, mean, std)
                 az_range_loss = az_range_mse(AzRange_rec, AzRange_target)
 
                 losses.append(az_range_loss.item())
@@ -68,23 +70,24 @@ def visualize(args, epoch, model, data_loader, writer, steering_dict):
         for iter, data in enumerate(data_loader):
             smat_target, elevation = data
             smat_target = smat_target.to(args.device)
-            AzRange_target = beamforming(smat_target, steering_dict, args, elevation)
             writer.add_figure('Rx_selection', selection_plot(model), epoch)
 
-            if epoch != 0:
-                AzRange_rec = model(smat_target, steering_dict, args, elevation)
-                writer.add_figure('AzRange_reconstruction0',
-                                  polar_plot(AzRange_rec, steering_dict, args), epoch)
-                error = abs(AzRange_rec - AzRange_target)
-                writer.add_figure('Error0', polar_plot(-error, steering_dict, args), epoch)
-            else:
-                rx_binary = model.rx_binary.repeat_interleave(model.n_in)
-                steering_dict_low = steering_dict.copy()
-                steering_dict_low['H'] = steering_dict['H'] * rx_binary.view(-1, 1, 1, 1)
-                AzRange_corrupted = beamforming(smat_target, steering_dict_low, args, elevation)
-                writer.add_figure('AzRange_target0', polar_plot(AzRange_target, steering_dict, args), epoch)
-                writer.add_figure('AzRange_corrupted0', polar_plot(AzRange_corrupted, steering_dict, args), epoch)
+            AzRange_target = beamforming(smat_target, steering_dict, args, elevation)
+            AzRange_target, mean, std = normalize_instance(AzRange_target)
 
+            AzRange_rec = model(smat_target, steering_dict, args, elevation, mean, std)
+            rx_binary = model.rx_binary.repeat_interleave(model.n_in)
+            steering_dict_low = steering_dict.copy()
+            steering_dict_low['H'] = steering_dict['H'] * rx_binary.view(-1, 1, 1, 1)
+            AzRange_corrupted = beamforming(smat_target, steering_dict_low, args, elevation)
+
+            AzRange_rec = unnormalize(AzRange_rec, mean, std)
+            AzRange_target = unnormalize(AzRange_target, mean, std)
+
+            for i in range(6):
+                writer.add_figure(f'{i}cm',
+                                  polar_plot3(AzRange_corrupted[i], AzRange_rec[i], AzRange_target[i],
+                                              steering_dict, args), epoch)
             break
 
 

@@ -22,14 +22,16 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import scipy.io as sio
 from models.unet import UnetModel
-from models.complex_unet import ComplexUnetModel
-from models.complex_cnn import ComplexCNNModel
-from models.complex_cnn_1d import ComplexCNN1DModel
-from models.complex_resnet import ResNet
+from models.cnn import CNNModel
+from models.cnn_1d import CNN1DModel
+from models.fc1d import FC1DModel
+from models.resnet import ResNet
 from utils import *
 
-rx_low = [0,1, 2, 4,5, 6, 8,9, 10, 12,13, 14, 16,17, 18]
-# rx_low = list(range(20))
+# rx_low = [0,1,2,3,4,5,6,7,13,19]        # nested
+# rx_low = [0,2,4,6,8,10,12,14,16,18]     # uniform
+# rx_low = [5,6,7,8,9,10,11,12,13,14]     # centered
+rx_low = [0,6,7,8,9,10,11,12,13,19]     # centered-edges
 
 
 def train_epoch(args, epoch, model, data_loader, optimizer, writer, steering_dict):
@@ -112,19 +114,14 @@ def visualize(args, epoch, model, data_loader, writer, steering_dict):
             steering_dict_low['H'] = steering_dict['H'][ind]
             AzRange_low = beamforming(smat_low, steering_dict_low, args, elevation)
             AzRange_low = normalize(AzRange_low, mean, std)
+            AzRange_rec = model(AzRange_low)
+            AzRange_rec = unnormalize(AzRange_rec, mean, std)
+            AzRange_corrupted = beamforming(smat_low, steering_dict_low, args, elevation)
             AzRange_target = unnormalize(AzRange_target, mean, std)
-
-            if epoch != 0:
-                AzRange_rec = model(AzRange_low)
-                AzRange_rec = unnormalize(AzRange_rec, mean, std)
-                writer.add_figure('AzRange_reconstruction0',
-                                  polar_plot(AzRange_rec, steering_dict, args), epoch)
-                error = abs(AzRange_rec - AzRange_target)
-                writer.add_figure('Error0', polar_plot(-error, steering_dict, args), epoch)
-            else:
-                AzRange_corrupted = beamforming(smat_low, steering_dict_low, args, elevation)
-                writer.add_figure('AzRange_target0', polar_plot(AzRange_target, steering_dict, args), epoch)
-                writer.add_figure('AzRange_corrupted0', polar_plot(AzRange_corrupted, steering_dict, args), epoch)
+            for i in range(6):
+                    writer.add_figure(f'{i}cm',
+                                      polar_plot3(AzRange_corrupted[i], AzRange_rec[i], AzRange_target[i],
+                                                  steering_dict, args), epoch)
             break
 
 
@@ -154,7 +151,7 @@ def load_model(checkpoint_file):
 
 
 def build_optim(args, model):
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
     return optimizer
 
 

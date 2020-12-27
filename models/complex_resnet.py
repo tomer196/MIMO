@@ -7,7 +7,7 @@ from torch.nn import functional as F
 class ResidualBlock(nn.Module):
     def __init__(self, in_channels, out_channels, stride=1, downsample=None):
         super(ResidualBlock, self).__init__()
-        self.conv1 = ComplexConv2d(in_channels, out_channels, stride=stride, kernel_size=3, padding=1)
+        self.conv1 = F.Conv2d(in_channels, out_channels, stride=stride, kernel_size=3, padding=1)
         self.bn1 = ComplexBatchNorm2d(out_channels)
         self.relu = nn.ReLU(inplace=True)
         self.conv2 = ComplexConv2d(out_channels, out_channels, kernel_size=3, padding=1)

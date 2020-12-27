@@ -8,8 +8,8 @@ from torch import zeros_like, Tensor
 
 
 class SmatData(Dataset):
-    def __init__(self, root, sample_rate=1, slice_range=None):
-        slice_range = slice_range if slice_range is not None else (16, 17)
+    def __init__(self, root, sample_rate=1, slice_range=None, display_set=False):
+        slice_range = slice_range if slice_range is not None else (2, 3)
         self.slices = []
         root = os.getcwd() + root
         for current_dir, sub_dirs, files in os.walk(root):
@@ -21,6 +21,13 @@ class SmatData(Dataset):
             random.shuffle(self.slices)
             num_files = round(len(self.slices) * sample_rate)
             self.slices = self.slices[:num_files]
+        if display_set:
+            slices = [s[0] for s in self.slices]
+            slices.sort()
+            l = len(slices[0]) - 6
+            slices = [s[l:-5] for s in slices]
+            slices.sort(key=int)
+            self.slices = [(self.slices[0][0][:l] + s + 'cm.h5', 2) for s in slices]
 
     def __len__(self):
         return len(self.slices)
@@ -39,18 +46,22 @@ def create_datasets(args):
     train_data = SmatData(
         root=args.data_path + 'Training',
         sample_rate=args.sample_rate,
-        slice_range=(15, 17)
+        slice_range=(1, 4)
     )
     val_data = SmatData(
         root=args.data_path + 'Validation',
         sample_rate=args.sample_rate
     )
-    return val_data, train_data
+    display_data = SmatData(
+        root=args.data_path + 'Validation/metric',
+        sample_rate=args.sample_rate,
+        display_set=True
+    )
+    return val_data, train_data, display_data
 
 
 def create_data_loaders(args):
-    val_data, train_data = create_datasets(args)
-    display_data = [val_data[i] for i in range(0, len(val_data), len(val_data) // 16)]
+    val_data, train_data, display_data = create_datasets(args)
 
     train_loader = DataLoader(
         dataset=train_data,
