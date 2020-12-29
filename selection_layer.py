@@ -15,7 +15,7 @@ class SelectionUnetModel(Module):
         computing and computer-assisted intervention, pages 234–241. Springer, 2015.
     """
 
-    def __init__(self, in_chans, out_chans, chans, num_pool_layers, drop_prob, init='rand'):
+    def __init__(self, in_chans, out_chans, chans, num_pool_layers, drop_prob, init='random'):
         """
         Args:
             in_chans (int): Number of channels in the input to the U-Net model.
@@ -29,8 +29,24 @@ class SelectionUnetModel(Module):
         self.reconstruction = UnetModel(1, 1, chans, num_pool_layers, drop_prob)
         self.n_in = in_chans
         self.n_out = out_chans
-        if init == 'rand':
+        if init == 'random':
             rx = rand(in_chans)
+        elif init == 'centered':
+            ind = [5,6,7,8,9,10,11,12,13,14]
+            rx = rand(in_chans) * 0.5
+            rx[ind] += 0.5
+        elif init == 'nested':
+            ind = [0,1,2,3,4,5,6,7,13,19]
+            rx = rand(in_chans) * 0.5
+            rx[ind] += 0.5
+        elif init == 'uniform':
+            ind = [0,2,4,6,8,10,12,14,16,18]
+            rx = rand(in_chans) * 0.5
+            rx[ind] += 0.5
+        elif init == 'centered_edges':
+            ind = [0,6,7,8,9,10,11,12,13,19]
+            rx = rand(in_chans) * 0.5
+            rx[ind] += 0.5
         else:
             raise ValueError
 

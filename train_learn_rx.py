@@ -1,3 +1,6 @@
+
+from warnings import simplefilter
+simplefilter(action='ignore', category=FutureWarning)
 import pathlib
 import random
 import shutil
@@ -6,7 +9,6 @@ import os
 # os.environ["CUDA_VISIBLE_DEVICES"] = "6"
 import torch
 from torch.utils.tensorboard import SummaryWriter
-import torchvision
 from data_load import SmatData, create_data_loaders, create_datasets
 import matplotlib
 matplotlib.use('Agg')
@@ -98,6 +100,7 @@ def build_model(args):
         chans=args.num_chans,
         num_pool_layers=args.num_pools,
         drop_prob=args.drop_prob,
+        init=args.init,
     ).to(args.device)
     return model
 
@@ -127,7 +130,7 @@ if __name__ == '__main__':
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
     args.exp_dir = f'summary/{args.test_name}'
-    args.checkpoint = f'summary/{args.test_name}/model.pt'
+    args.checkpoint = f'summary/{args.test_name}/best_model.pt'
     pathlib.Path(args.exp_dir).mkdir(parents=True, exist_ok=True)
     writer = SummaryWriter(log_dir=args.exp_dir)
     with open(args.exp_dir + '/args.txt', "w") as text_file:

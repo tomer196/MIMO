@@ -101,7 +101,7 @@ def cartesian_plot(rangeAzMap_db, steering_dict, args, dB_Range=40):
     r = time_vector[:args.Nfft//2] * 3e8 / 2
     r_max = r[-1]
     fig, ax = plt.subplots(figsize=(6, 6))
-    ax.imshow(rangeAzMap_db, origin='lower', cmap='jet', extent=[-1, 1, -1, 1], vmax=0, vmin=-dB_Range)
+    ax.imshow(rangeAzMap_db.detach().cpu(), origin='lower', cmap='jet', extent=[-1, 1, -1, 1], vmax=0, vmin=-dB_Range)
     ax.set_xticks([-1, -0.5, 0, 0.5, 1])
     ax.set_yticks([-1, -0.5, 0, 0.5, 1])
 
@@ -246,7 +246,7 @@ def save_model(args, exp_dir, epoch, model, optimizer, best_dev_loss, is_new_bes
 def create_arg_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('--seed', type=int, default=0, help='Random seed')
-    parser.add_argument('--test-name', type=str, default='10/learned_unet_1e-5_1e-4', help='Test name')
+    parser.add_argument('--test-name', type=str, default='10/fix_nested_1e-5', help='Test name')
     parser.add_argument('--resume', action='store_true',
                         help='If set, resume the training from a previous model checkpoint. '
                              '"--checkpoint" should be set with this')
@@ -254,6 +254,11 @@ def create_arg_parser():
                         help='Path to an existing checkpoint. Used along with "--resume"')
 
     # model parameters
+    parser.add_argument('--lr', type=float, default=1e-5, help='Learning rate')
+    parser.add_argument('--selection-lr', type=float, default=0, help='Learning rate of the selection layer')
+    parser.add_argument('--init', type=str, default='nested',
+                        help='How to init the rx selection layer')
+
     parser.add_argument('--num-pools', type=int, default=5, help='Number of U-Net pooling layers')
     parser.add_argument('--drop-prob', type=float, default=0, help='Dropout probability')
     parser.add_argument('--num-chans', type=int, default=32, help='Number of U-Net channels')
@@ -271,12 +276,10 @@ def create_arg_parser():
     parser.add_argument('--sample-rate', type=float, default=1, help='Sample rate')
     parser.add_argument('--batch-size', default=64, type=int, help='Mini batch size')
     parser.add_argument('--num-epochs', type=int, default=100, help='Number of training epochs')
-    parser.add_argument('--lr', type=float, default=1e-5, help='Learning rate')
-    parser.add_argument('--selection-lr', type=float, default=1e-4, help='Learning rate of the selection layer')
     parser.add_argument('--freq-start', type=int, default=62, help='GHz')
     parser.add_argument('--freq-stop', type=int, default=69, help='GHz')
     parser.add_argument('--freq-points', type=int, default=75, help='Number of freqs points')
     parser.add_argument('--Nfft', type=int, default=256, help='number of fft points')
-    parser.add_argument('--numOfDigitalBeams', type=int, default=32, help='numOfDigitalBeams')
+    parser.add_argument('--numOfDigitalBeams', type=int, default=64, help='numOfDigitalBeams')
     parser.add_argument('--start-angle', type=float, default=60, help='start angle for beamforming (deg)')
     return parser.parse_args()
