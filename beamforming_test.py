@@ -13,9 +13,10 @@ import matplotlib.pyplot as plt
 args = create_arg_parser()
 data_set = SmatData(args.data_path)
 Smat, elevation = data_set[0]
+Smat = Smat.to(args.device)
 
 steering_dict = create_steering_matrix(args)
-# plot_beampatern(steering_dict)
+plot_beampatern(steering_dict, steering_dict['H'], args).show()
 
 for i in range(5):
     rangeAzMap = beamforming(Smat, steering_dict, args, [i])

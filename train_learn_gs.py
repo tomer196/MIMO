@@ -12,7 +12,7 @@ from torch.utils.tensorboard import SummaryWriter
 from data_load import SmatData, create_data_loaders, create_datasets
 import matplotlib
 matplotlib.use('Agg')
-from selection_layer import SelectionUnetModel
+from selection_layer import SelectionUnetModel, SelectionUnetModelGS
 from models.unet import UnetModel
 from utils import *
 
@@ -33,7 +33,6 @@ def train_epoch(args, epoch, model, data_loader, optimizer, writer, steering_dic
 
         loss.backward()
         optimizer.step()
-        model.apply_binary_grad(args.selection_lr)
 
         avg_loss = 0.99 * avg_loss + 0.01 * loss.item() if iter > 0 else loss.item()
         writer.add_scalar('TrainLoss', loss.item(), global_step + iter)
@@ -56,7 +55,7 @@ def evaluate(args, epoch, model, data_loader, writer, steering_dict):
                 AzRange_target = beamforming(smat_target, steering_dict, args, elevation)
                 AzRange_target, mean, std = normalize_instance(AzRange_target)
 
-                AzRange_rec = model(smat_target, steering_dict, args, elevation, mean, std)
+                AzRange_rec = model(smat_target, steering_dict, args, elevation, mean, std, sample=False)
                 az_range_loss = az_range_mse(AzRange_rec, AzRange_target)
 
                 losses.append(az_range_loss.item())
@@ -77,7 +76,7 @@ def visualize(args, epoch, model, data_loader, writer, steering_dict):
             AzRange_target = beamforming(smat_target, steering_dict, args, elevation)
             AzRange_target, mean, std = normalize_instance(AzRange_target)
 
-            AzRange_rec = model(smat_target, steering_dict, args, elevation, mean, std)
+            AzRange_rec = model(smat_target, steering_dict, args, elevation, mean, std, sample=False)
             rx_binary = model.rx_binary.repeat_interleave(model.n_in)
             steering_dict_low = steering_dict.copy()
             steering_dict_low['H'] = steering_dict['H'] * rx_binary.view(-1, 1, 1, 1)
@@ -94,7 +93,7 @@ def visualize(args, epoch, model, data_loader, writer, steering_dict):
 
 
 def build_model(args):
-    model = SelectionUnetModel(
+    model = SelectionUnetModelGS(
         in_chans=20,
         out_chans=10,
         chans=args.num_chans,
@@ -120,7 +119,10 @@ def load_model(checkpoint_file):
 
 
 def build_optim(args, model):
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+    optimizer = torch.optim.Adam([
+                {'params': model.reconstruction.parameters()},
+                {'params': [model.rx], 'lr': args.selection_lr}
+            ], lr=args.lr)
     return optimizer
 
 

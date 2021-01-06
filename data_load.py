@@ -18,6 +18,7 @@ class SmatData(Dataset):
                     for elevation in range(slice_range[0], slice_range[1]):
                         self.slices.append((current_dir + '/' + name, elevation))
         if sample_rate < 1:
+            random.seed(0)
             random.shuffle(self.slices)
             num_files = round(len(self.slices) * sample_rate)
             self.slices = self.slices[:num_files]
@@ -54,7 +55,7 @@ def create_datasets(args):
     )
     display_data = SmatData(
         root=args.data_path + 'Validation/metric',
-        sample_rate=args.sample_rate,
+        sample_rate=1,
         display_set=True
     )
     return val_data, train_data, display_data

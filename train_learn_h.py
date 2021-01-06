@@ -12,7 +12,7 @@ from torch.utils.tensorboard import SummaryWriter
 from data_load import SmatData, create_data_loaders, create_datasets
 import matplotlib
 matplotlib.use('Agg')
-from selection_layer import SelectionUnetModel
+from selection_layer import HSelectionUnetModel
 from models.unet import UnetModel
 from utils import *
 
@@ -33,7 +33,7 @@ def train_epoch(args, epoch, model, data_loader, optimizer, writer, steering_dic
 
         loss.backward()
         optimizer.step()
-        model.apply_binary_grad(args.selection_lr)
+        # model.apply_binary_grad(args.selection_lr)
 
         avg_loss = 0.99 * avg_loss + 0.01 * loss.item() if iter > 0 else loss.item()
         writer.add_scalar('TrainLoss', loss.item(), global_step + iter)
@@ -73,6 +73,7 @@ def visualize(args, epoch, model, data_loader, writer, steering_dict):
             smat_target, elevation = data
             smat_target = smat_target.to(args.device)
             writer.add_figure('Rx_selection', selection_plot(model), epoch)
+            writer.add_figure('Beampattern', plot_beampatern(steering_dict, model.H, args), epoch)
 
             AzRange_target = beamforming(smat_target, steering_dict, args, elevation)
             AzRange_target, mean, std = normalize_instance(AzRange_target)
@@ -80,7 +81,7 @@ def visualize(args, epoch, model, data_loader, writer, steering_dict):
             AzRange_rec = model(smat_target, steering_dict, args, elevation, mean, std)
             rx_binary = model.rx_binary.repeat_interleave(model.n_in)
             steering_dict_low = steering_dict.copy()
-            steering_dict_low['H'] = steering_dict['H'] * rx_binary.view(-1, 1, 1, 1)
+            steering_dict_low['H'] = model.H * rx_binary.view(-1, 1, 1, 1)
             AzRange_corrupted = beamforming(smat_target, steering_dict_low, args, elevation)
 
             AzRange_rec = unnormalize(AzRange_rec, mean, std)
@@ -93,14 +94,15 @@ def visualize(args, epoch, model, data_loader, writer, steering_dict):
             break
 
 
-def build_model(args):
-    model = SelectionUnetModel(
+def build_model(args, steering_dict):
+    model = HSelectionUnetModel(
         in_chans=20,
         out_chans=10,
         chans=args.num_chans,
         num_pool_layers=args.num_pools,
         drop_prob=args.drop_prob,
         init=args.init,
+        H=steering_dict['H'].clone()
     ).to(args.device)
     return model
 
@@ -109,7 +111,7 @@ def load_model(checkpoint_file):
     checkpoint = torch.load(checkpoint_file)
     args = checkpoint['args']
     steering_dict = checkpoint['steering_dict']
-    model = build_model(args)
+    model = build_model(args, steering_dict)
     if args.data_parallel:
         model = torch.nn.DataParallel(model)
     model.load_state_dict(checkpoint['model'])
@@ -120,7 +122,10 @@ def load_model(checkpoint_file):
 
 
 def build_optim(args, model):
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+    optimizer = torch.optim.Adam([
+                {'params': model.reconstruction.parameters()},
+                {'params': [model.H], 'lr': args.selection_lr}
+            ], lr=args.lr)
     return optimizer
 
 
@@ -144,13 +149,13 @@ if __name__ == '__main__':
         start_epoch = checkpoint['epoch'] + 1
         del checkpoint
     else:
-        model = build_model(args)
+        steering_dict = create_steering_matrix(args)
+        model = build_model(args, steering_dict)
         if args.data_parallel:
             model = torch.nn.DataParallel(model)
         optimizer = build_optim(args, model)
         best_dev_loss = 1e9
         start_epoch = 0
-        steering_dict = create_steering_matrix(args)
 
     train_loader, dev_loader, display_loader = create_data_loaders(args)
     _, _ = evaluate(args, 0, model, dev_loader, writer, steering_dict)

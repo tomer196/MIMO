@@ -55,7 +55,7 @@ def visualize(args, epoch, model, data_loader, steering_dict):
             AzRange_target = unnormalize(AzRange_target, mean, std)
 
             for i in range(6):
-                polar_plot3(AzRange_corrupted[i], AzRange_rec[i], AzRange_target[i],
+                cartesian_plot3(AzRange_corrupted[i], AzRange_rec[i], AzRange_target[i],
                                               steering_dict, args).show()
             break
 
@@ -85,7 +85,7 @@ def visualize56(args, model, steering_dict):
         AzRange_rec = unnormalize(AzRange_rec, mean, std)
         AzRange_target = unnormalize(AzRange_target, mean, std)
 
-        polar_plot3(AzRange_corrupted[0], AzRange_rec[0], AzRange_target[0],
+        cartesian_plot3(AzRange_corrupted[0], AzRange_rec[0], AzRange_target[0],
                                           steering_dict, args).show()
 
 
@@ -125,7 +125,7 @@ if __name__ == '__main__':
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
     args.exp_dir = f'summary/{args.test_name}'
-    args.checkpoint = f'summary/{args.test_name}/model.pt'
+    args.checkpoint = f'summary/{args.test_name}/best_model.pt'
     print(args)
 
     checkpoint, model, optimizer, steering_dict = load_model(args.checkpoint)
