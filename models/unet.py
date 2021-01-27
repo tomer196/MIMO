@@ -100,7 +100,7 @@ class UnetModel(nn.Module):
             (torch.Tensor): Output tensor of shape [batch_size, self.out_chans, height, width]
         """
         stack = []
-        output = input.unsqueeze(1)
+        output = input
         # Apply down-sampling layers
         for layer in self.down_sample_layers:
             output = layer(output)
@@ -114,7 +114,7 @@ class UnetModel(nn.Module):
             output = F.interpolate(output, scale_factor=2, mode='bilinear', align_corners=False)
             output = torch.cat([output, stack.pop()], dim=1)
             output = layer(output)
-        return self.conv2(output).squeeze(1)
+        return self.conv2(output)
 
 
 class UniModel(nn.Module):

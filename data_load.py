@@ -5,11 +5,15 @@ from torch.utils.data import Dataset
 from torch import Tensor, cfloat, complex
 from torch.utils.data import DataLoader
 from torch import zeros_like, Tensor
+from utils import augmentation
+
 
 
 class SmatData(Dataset):
-    def __init__(self, root, sample_rate=1, slice_range=None, display_set=False):
+    def __init__(self, root, args, sample_rate=1, slice_range=None, display_set=False, augmentation=False):
         slice_range = slice_range if slice_range is not None else (2, 3)
+        self.augmentation=augmentation
+        self.args = args
         self.slices = []
         root = os.getcwd() + root
         for current_dir, sub_dirs, files in os.walk(root):
@@ -41,20 +45,26 @@ class SmatData(Dataset):
         Smat = zeros_like(tmp)
         Smat[::2, :] = tmp[:200, :]
         Smat[1::2, :] = tmp[200:, :]
+        if self.augmentation:
+            Smat = augmentation(Smat, self.args)
         return Smat, elevation
 
 def create_datasets(args):
     train_data = SmatData(
         root=args.data_path + 'Training',
+        args=args,
         sample_rate=args.sample_rate,
-        slice_range=(1, 4)
+        slice_range=(1, 4),
+        augmentation=False
     )
     val_data = SmatData(
         root=args.data_path + 'Validation',
+        args=args,
         sample_rate=args.sample_rate
     )
     display_data = SmatData(
         root=args.data_path + 'Validation/metric',
+        args=args,
         sample_rate=1,
         display_set=True
     )

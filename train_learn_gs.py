@@ -8,11 +8,12 @@ import time
 import os
 # os.environ["CUDA_VISIBLE_DEVICES"] = "6"
 import torch
+from torch import diag, tanh
 from torch.utils.tensorboard import SummaryWriter
 from data_load import SmatData, create_data_loaders, create_datasets
 import matplotlib
 matplotlib.use('Agg')
-from selection_layer import SelectionUnetModel, SelectionUnetModelGS
+from selection_layer import SelectionUnetModel, SelectionUnetModelGSMultiVariate
 from models.unet import UnetModel
 from utils import *
 
@@ -26,6 +27,7 @@ def train_epoch(args, epoch, model, data_loader, optimizer, writer, steering_dic
         smat_target, elevation = data
         smat_target = smat_target.to(args.device)
         AzRange_target = beamforming(smat_target, steering_dict, args, elevation)
+        AzRange_target = abs(AzRange_target)
         AzRange_target, mean, std = normalize_instance(AzRange_target)
 
         AzRange_rec = model(smat_target, steering_dict, args, elevation, mean, std)
@@ -46,6 +48,8 @@ def train_epoch(args, epoch, model, data_loader, optimizer, writer, steering_dic
 def evaluate(args, epoch, model, data_loader, writer, steering_dict):
     model.eval()
     losses =[]
+    psnr_list = []
+    ssim_list = []
     start = time.perf_counter()
     with torch.no_grad():
         if epoch != 0:
@@ -53,15 +57,22 @@ def evaluate(args, epoch, model, data_loader, writer, steering_dict):
                 smat_target, elevation = data
                 smat_target = smat_target.to(args.device)
                 AzRange_target = beamforming(smat_target, steering_dict, args, elevation)
+                AzRange_target = abs(AzRange_target)
                 AzRange_target, mean, std = normalize_instance(AzRange_target)
 
                 AzRange_rec = model(smat_target, steering_dict, args, elevation, mean, std, sample=False)
                 az_range_loss = az_range_mse(AzRange_rec, AzRange_target)
 
                 losses.append(az_range_loss.item())
+                psnr_list.append(psnr(AzRange_target, AzRange_rec))
+                ssim_list.append(ssim(AzRange_target, AzRange_rec))
 
             writer.add_scalar('AzRange_Loss', np.mean(losses), epoch)
+            writer.add_scalar('PSNR', np.mean(psnr_list), epoch)
+            writer.add_scalar('SSIM', np.mean(ssim_list), epoch)
         writer.add_text('Rx_low', str(model.rx_binary.detach().cpu().numpy()).replace(' ', ',').replace('\n', ''), epoch)
+    print (f'Epoch: {epoch}, Loss: {np.mean(losses):.4f}, PSNR: {np.mean(psnr_list):.2f}, '
+           f'SSIM: {np.mean(ssim_list):.4f}')
     return np.mean(losses), time.perf_counter() - start
 
 
@@ -72,8 +83,16 @@ def visualize(args, epoch, model, data_loader, writer, steering_dict):
             smat_target, elevation = data
             smat_target = smat_target.to(args.device)
             writer.add_figure('Rx_selection', selection_plot(model), epoch)
+            fig, ax = plt.subplots(figsize=(6, 6))
+            sqrt_sigma = tanh(model.rx_sqrt_sigma.detach().cpu())
+            sigma = sqrt_sigma @ sqrt_sigma.T + diag(model.rx_diag_sigma ** 2).detach().cpu()
+            im1=ax.imshow(sigma)
+            fig.colorbar(im1)
+            writer.add_figure('C', fig, epoch)
+
 
             AzRange_target = beamforming(smat_target, steering_dict, args, elevation)
+            AzRange_target = abs(AzRange_target)
             AzRange_target, mean, std = normalize_instance(AzRange_target)
 
             AzRange_rec = model(smat_target, steering_dict, args, elevation, mean, std, sample=False)
@@ -81,24 +100,29 @@ def visualize(args, epoch, model, data_loader, writer, steering_dict):
             steering_dict_low = steering_dict.copy()
             steering_dict_low['H'] = steering_dict['H'] * rx_binary.view(-1, 1, 1, 1)
             AzRange_corrupted = beamforming(smat_target, steering_dict_low, args, elevation)
+            AzRange_corrupted = abs(AzRange_corrupted)
 
             AzRange_rec = unnormalize(AzRange_rec, mean, std)
             AzRange_target = unnormalize(AzRange_target, mean, std)
 
-            for i in range(3,8):
+            for i in range(2,7):
                 writer.add_figure(f'{i}cm',
                                   cartesian_plot3(AzRange_corrupted[i], AzRange_rec[i], AzRange_target[i],
                                               steering_dict, args), epoch)
+                writer.add_figure(f'log{i}cm',
+                                  cartesian_plot3(AzRange_corrupted[i], AzRange_rec[i], AzRange_target[i],
+                                              steering_dict, args, log=True), epoch)
             break
 
 
 def build_model(args):
-    model = SelectionUnetModelGS(
+    model = SelectionUnetModelGSMultiVariate(
         in_chans=20,
-        out_chans=10,
+        out_chans=args.num_rx_chans,
         chans=args.num_chans,
         num_pool_layers=args.num_pools,
         drop_prob=args.drop_prob,
+        learn_selection= args.selection_lr != 0,
         init=args.init,
     ).to(args.device)
     return model
@@ -121,7 +145,7 @@ def load_model(checkpoint_file):
 def build_optim(args, model):
     optimizer = torch.optim.Adam([
                 {'params': model.reconstruction.parameters()},
-                {'params': [model.rx], 'lr': args.selection_lr}
+                {'params': [model.rx, model.rx_sqrt_sigma], 'lr': args.selection_lr}
             ], lr=args.lr)
     return optimizer
 

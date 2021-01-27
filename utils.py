@@ -5,8 +5,8 @@ import shutil
 # matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import scipy.io as sio
-from torch import asin, linspace, Tensor, zeros, meshgrid, exp, complex, log10, abs, mean, max, arange, cfloat, atan, \
-    sqrt, cat, view_as_real, view_as_complex, sum, log, topk, zeros_like
+from torch import asin, sign, linspace, Tensor, zeros, meshgrid, exp, complex, log10, abs, mean, max, arange, cfloat, atan, \
+    sqrt, cat, view_as_real, view_as_complex, sum, log, topk, zeros_like, flip, rand, randn, randint
 from torch import sin as sin_th
 from torch.fft import fft, ifft
 from torch.nn.functional import interpolate, grid_sample
@@ -17,6 +17,47 @@ import argparse
 import pathlib
 import numpy as np
 import torch
+from skimage.metrics import peak_signal_noise_ratio, structural_similarity
+
+def augmentation (smat, args):
+    device = smat.device
+    c = 3e8
+    # Mirror left-right
+    if randn(1) > 0:
+        smat = flip(smat, dims=[1])
+
+    # range augmentation
+    freqs = linspace(args.freq_start, args.freq_stop, args.freq_points).to(device) * 1e9
+    delta_f = freqs[1] - freqs[0]  # frequency step
+    delta_R = rand(1).to(device) * 0.2  # move target + 0-20[cm]
+    random_range_phase = exp(complex(real=Tensor([0]).to(device),
+                                     imag=2 * pi * freqs[0] * 2 * delta_R / c)) * \
+                         exp(complex(real=Tensor([0]).to(device),
+                                     imag=2 * pi * arange(args.freq_points).to(device) * delta_f * 2 * delta_R / c))
+    smat = smat * random_range_phase.unsqueeze(0)
+
+    # angle augmentation
+    ants_locations = Tensor(sio.loadmat('matlab/ants_location.mat')['VtrigU_ants_location']).to(device)
+    delta = (ants_locations[:20, 0] + ants_locations[20, 0]).repeat_interleave(20)  # Rx locations
+    random_theta_az = deg2rad(sign(randn(1)) * rand(1) * 10).to(device)
+    random_az_phase = exp(complex(real=Tensor([0]).to(device),
+                                  imag=2 * pi * args.freq_start * 1e9 / c * (delta * sin_th(random_theta_az))))
+    smat = smat * random_az_phase.unsqueeze(1)
+    return smat
+
+def psnr(gt, pred):
+    """ Compute Peak Signal to Noise Ratio metric (PSNR) """
+    gt = gt.detach().cpu().numpy()
+    pred = pred.detach().cpu().numpy()
+    return peak_signal_noise_ratio(gt, pred, data_range=gt.max())
+
+def ssim(gt, pred):
+    """ Compute Structural Similarity Index Metric (SSIM). """
+    gt = gt.detach().cpu().numpy()
+    pred = pred.detach().cpu().numpy()
+    return structural_similarity(
+        gt.transpose(1, 2, 0), pred.transpose(1, 2, 0), multichannel=True, data_range=gt.max()
+    )
 
 def hard_topk(w, k):
     top_ind = topk(w, k).indices
@@ -98,37 +139,51 @@ def polar_plot3(corrupted, rec, target, steering_dict, args, dB_Range=40):
     plt.ylabel('Range [m]')
     return fig
 
-def cartesian_plot(rangeAzMap_db, steering_dict, args, dB_Range=40):
+def cartesian_plot(rangeAzMap, steering_dict, args, dB_Range=40, log=False):
     Ts = 1 / args.Nfft / (steering_dict['freqs'][1] - steering_dict['freqs'][0] + 1e-16)
     time_vector = arange(0, Ts * (args.Nfft - 1), Ts)
     r = time_vector[:args.Nfft//2] * 3e8 / 2
     r_max = r[-1]
+
+    rangeAzMap /= rangeAzMap.max()
+
+    if log:
+        vmax = 0
+        vmin = -dB_Range
+        rangeAzMap = 20 * log10(rangeAzMap)
+    else:
+        vmax = 1
+        vmin = 0
+
     fig, ax = plt.subplots(figsize=(6, 6))
-    ax.imshow(rangeAzMap_db.detach().cpu(), origin='lower', cmap='jet', extent=[-1, 1, -1, 1], vmax=0, vmin=-dB_Range)
+    ax.imshow(rangeAzMap.detach().cpu(), origin='lower', cmap='jet', extent=[-1, 1, -1, 1], vmax=vmax, vmin=vmin)
     ax.set_xticks([-1, -0.5, 0, 0.5, 1])
     ax.set_yticks([-1, -0.5, 0, 0.5, 1])
     ax.set_xticklabels(f'{int(i)}' for i in linspace(-args.start_angle, args.start_angle, 5))
     ax.set_yticklabels(f'{i:.2f}' for i in linspace(r_max/4, r_max, 5))
     plt.xlabel('Azimuth [deg]')
     plt.ylabel('Range [m]')
-    plt.show()
+    return fig
 
-def cartesian_plot3(corrupted, rec, target, steering_dict, args, dB_Range=40):
+def cartesian_plot3(corrupted, rec, target, steering_dict, args, dB_Range=40, log=False):
     Ts = 1 / args.Nfft / (steering_dict['freqs'][1] - steering_dict['freqs'][0] + 1e-16)
     time_vector = arange(0, Ts * (args.Nfft - 1), Ts)
     r = time_vector[:args.Nfft//2] * 3e8 / 2
     r_max = r[-1]
-    vmax = 1
-    vmin = 0
-    # vmax = 0
-    # vmin = -dB_Range
-    # target = 20 * log10(target)
-    # rec = 20 * log10(rec)
-    # corrupted = 20 * log10(corrupted)
 
     corrupted /= corrupted.max()
     rec /= rec.max()
     target /= target.max()
+
+    if log:
+        vmax = 0
+        vmin = -dB_Range
+        target = 20 * log10(target)
+        rec = 20 * log10(rec)
+        corrupted = 20 * log10(corrupted)
+    else:
+        vmax = 1
+        vmin = 0
 
     fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(12, 4))
     ax1.imshow(corrupted.detach().cpu(), origin='lower', cmap='jet', extent=[-1, 1, -1, 1], vmax=vmax, vmin=vmin)
@@ -136,20 +191,21 @@ def cartesian_plot3(corrupted, rec, target, steering_dict, args, dB_Range=40):
     ax1.set_yticks([-1, -0.5, 0, 0.5, 1])
     ax1.set_xticklabels(f'{int(i)}' for i in linspace(-args.start_angle, args.start_angle, 5))
     ax1.set_yticklabels(f'{i:.2f}' for i in linspace(r_max/4, r_max, 5))
+    ax1.set_ylabel('Range [m]')
 
     ax2.imshow(rec.detach().cpu(), origin='lower', cmap='jet', extent=[-1, 1, -1, 1], vmax=vmax, vmin=vmin)
     ax2.set_xticks([-1, -0.5, 0, 0.5, 1])
     ax2.set_yticks([-1, -0.5, 0, 0.5, 1])
     ax2.set_xticklabels(f'{int(i)}' for i in linspace(-args.start_angle, args.start_angle, 5))
     ax2.set_yticklabels(f'{i:.2f}' for i in linspace(r_max/4, r_max, 5))
+    ax2.set_xlabel('Azimuth [deg]')
 
     ax3.imshow(target.detach().cpu(), origin='lower', cmap='jet', extent=[-1, 1, -1, 1], vmax=vmax, vmin=vmin)
     ax3.set_xticks([-1, -0.5, 0, 0.5, 1])
     ax3.set_yticks([-1, -0.5, 0, 0.5, 1])
     ax3.set_xticklabels(f'{int(i)}' for i in linspace(-args.start_angle, args.start_angle, 5))
     ax3.set_yticklabels(f'{i:.2f}' for i in linspace(r_max/4, r_max, 5))
-    plt.xlabel('Azimuth [deg]')
-    plt.ylabel('Range [m]')
+
     return fig
 
 def selection_plot(model):
@@ -170,8 +226,8 @@ def plot_beampatern(steering_dict, H, args):
     delta = delta.cpu()
     f = steering_dict['freqs'][0].cpu()
     D_phi = exp(complex(real=Tensor([0]), imag=-2 * pi * f * delta / 3e8 * m_mat * sin(phi_mat))).T
-    Az_Directivity_dB = 20 * log10(abs(D_phi.T @ H[::20, 0, :]))
-    El_Directivity_dB = 20 * log10(abs(D_phi.T @ H[:20, 0, :]))
+    Az_Directivity_dB = 20 * log10(abs(D_phi.T @ H[::20, 60, :]))
+    El_Directivity_dB = 20 * log10(abs(D_phi.T @ H[:20, 60, :]))
     fig, (ax1, ax2) = plt.subplots(1, 2)
     ax1.plot(rad2deg(phi_rad), Az_Directivity_dB)
     ax1.set_ylim([-80, 25])
@@ -197,6 +253,7 @@ def create_steering_matrix(args):
     a2 = sin(deg2rad(start_angle))
     theta_vec = asin(linspace(a1, a2, args.numOfDigitalBeams)).to(args.device)  # Azimuth
     phi_vec = asin(linspace(sin(deg2rad(-5)), sin(deg2rad(5)), 5)).to(args.device)  # Elevation
+    # phi_vec = asin(linspace(a1, a2, args.numOfDigitalBeams)).to(args.device)  # Elevation
 
     # taylor_win = Tensor(sio.loadmat('matlab/taylorwin.mat')['taylor_win']).squeeze().to(args.device)
     # taylor_win_El = taylor_win.repeat(args.freq_points, n_tx).T
@@ -236,41 +293,56 @@ def beamforming(Smat, steering_dict, args, elevation_ind=[2]):  # default elevat
     #     BR_response = ifft(mean(H[:, :, beam_idx]*Smat, dim=0), n=args.Nfft)
     #     rangeAzMap[:, beam_idx] = BR_response[:args.Nfft // 2]
     H = steering_dict['H'][..., elevation_ind].permute(3, 0, 1, 2)
+    # H = steering_dict['H'][:, :, elevation_ind, :].permute(3, 0, 1, 2)
     if len(Smat.shape) == 2:  # batch dim
         Smat = Smat.unsqueeze(0)
     BR_response = ifft(complex_mean(H*Smat.unsqueeze(-1), dim=1), n=args.Nfft, dim=1)
     rangeAzMap = BR_response[:, args.Nfft // 8:args.Nfft // 2, :]
     rangeAzMap_db = 20 * log10(abs(rangeAzMap) / max(abs(rangeAzMap)))
-    return abs(rangeAzMap)
-
+    return rangeAzMap
 
 def az_range_mse(input, target):
     # input = 10**(input/20) * 10
     # target = 10**(target/20) * 10
-    return F.l1_loss(input, target)
+    return F.mse_loss(input, target)
+    # return F.l1_loss(input, target)
 
 def az_range_mse2(input, target, d=0.15):
     length = int(input.shape[1] * (1 - d))
     return F.l1_loss(input[:, length:, :], target[:, length:, :])
 
-
 def complex_mean(input, dim):
     return view_as_complex(mean(view_as_real(input), dim=dim))
 
-
 def normalize(data, mean, stddev, eps=0.):
     return (data - mean) / (stddev + eps)
-
 
 def normalize_instance(data, eps=0.):
     mean = data.mean(dim=(-2, -1), keepdim=True)
     std = data.std(dim=(-2, -1), keepdim=True)
     return normalize(data, mean, std, eps), mean, std
 
-
 def unnormalize(data, mean, std, eps=0.):
     return data * (std + eps) + mean
 
+def normalize_complex(data, mean, stddev, eps=0.):
+    data = view_as_real(data)
+    data = (data - mean) / (stddev + eps)
+    data = view_as_complex(data)
+    return data
+
+def normalize_instance_complex(data, eps=0.):
+    data = view_as_real(data)
+    mean = data.mean(dim=(-3, -2), keepdim=True)
+    std = data.std(dim=(-3, -2), keepdim=True)
+    data = view_as_complex(data)
+    return normalize_complex(data, mean, std, eps), mean, std
+
+def unnormalize_complex(data, mean, std, eps=0.):
+    data = view_as_real(data)
+    data = data * (std + eps) + mean
+    data = view_as_complex(data)
+    return data
 
 def save_model(args, exp_dir, epoch, model, optimizer, best_dev_loss, is_new_best, steering_dict):
     torch.save(
@@ -288,22 +360,22 @@ def save_model(args, exp_dir, epoch, model, optimizer, best_dev_loss, is_new_bes
     if is_new_best:
         shutil.copyfile(exp_dir + '/model.pt', exp_dir + '/best_model.pt')
 
-
 def create_arg_parser():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--seed', type=int, default=0, help='Random seed')
-    parser.add_argument('--test-name', type=str, default='10exp/gs_uniform_learned_1e-5_1e-4', help='Test name')
+    parser.add_argument('--test-name', type=str,
+        default='7mse/learned_1e-5_1e-4_gaussian_mvb_tanh', help='Test name')
     parser.add_argument('--resume', action='store_true',
                         help='If set, resume the training from a previous model checkpoint. '
                              '"--checkpoint" should be set with this')
-    parser.add_argument('--checkpoint', type=str, default='summary/test/model.pt',
-                        help='Path to an existing checkpoint. Used along with "--resume"')
-
-    # model parameters
+    parser.add_argument('--num-rx-chans', type=int, default=7, help='Number of U-Net channels')
     parser.add_argument('--lr', type=float, default=1e-5, help='Learning rate')
     parser.add_argument('--selection-lr', type=float, default=1e-4, help='Learning rate of the selection layer')
-    parser.add_argument('--init', type=str, default='uniform',
+    parser.add_argument('--init', type=str, default='random',
                         help='How to init the rx selection layer')
+
+    parser.add_argument('--seed', type=int, default=1, help='Random seed')
+    parser.add_argument('--checkpoint', type=str, default='summary/test/model.pt',
+                        help='Path to an existing checkpoint. Used along with "--resume"')
     parser.add_argument('--sample-rate', type=float, default=1, help='Sample rate')
 
     parser.add_argument('--num-pools', type=int, default=5, help='Number of U-Net pooling layers')

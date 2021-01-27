@@ -26,7 +26,10 @@ def train_epoch(args, epoch, model, data_loader, optimizer, writer, steering_dic
         smat_target, elevation = data
         smat_target = smat_target.to(args.device)
         AzRange_target = beamforming(smat_target, steering_dict, args, elevation)
+        AzRange_target = abs(AzRange_target)
         AzRange_target, mean, std = normalize_instance(AzRange_target)
+        # mean = 0
+        # std = 1
 
         AzRange_rec = model(smat_target, steering_dict, args, elevation, mean, std)
         loss = az_range_mse(AzRange_rec, AzRange_target)
@@ -46,7 +49,9 @@ def train_epoch(args, epoch, model, data_loader, optimizer, writer, steering_dic
 
 def evaluate(args, epoch, model, data_loader, writer, steering_dict):
     model.eval()
-    losses =[]
+    losses = []
+    psnr_list = []
+    ssim_list = []
     start = time.perf_counter()
     with torch.no_grad():
         if epoch != 0:
@@ -54,16 +59,25 @@ def evaluate(args, epoch, model, data_loader, writer, steering_dict):
                 smat_target, elevation = data
                 smat_target = smat_target.to(args.device)
                 AzRange_target = beamforming(smat_target, steering_dict, args, elevation)
+                AzRange_target = abs(AzRange_target)
                 AzRange_target, mean, std = normalize_instance(AzRange_target)
+                # mean = 0
+                # std = 1
 
                 AzRange_rec = model(smat_target, steering_dict, args, elevation, mean, std)
-                az_range_loss = az_range_mse(AzRange_rec, AzRange_target)
+                loss = az_range_mse(AzRange_rec, AzRange_target)
 
-                losses.append(az_range_loss.item())
+                losses.append(loss.item())
+                psnr_list.append(psnr(AzRange_target, AzRange_rec))
+                ssim_list.append(ssim(AzRange_target, AzRange_rec))
 
             writer.add_scalar('AzRange_Loss', np.mean(losses), epoch)
+            writer.add_scalar('PSNR', np.mean(psnr_list), epoch)
+            writer.add_scalar('SSIM', np.mean(ssim_list), epoch)
         writer.add_text('Rx_low', str(model.rx_binary.detach().cpu().numpy()).replace(' ', ',').replace('\n', ''), epoch)
-    return np.mean(losses), time.perf_counter() - start
+    print (f'Epoch: {epoch}, Loss: {np.mean(losses)}, PSNR: {np.mean(psnr_list):.2f}, '
+           f'SSIM: {np.mean(ssim_list):.4f}')
+    return np.mean(losses), np.mean(psnr_list), np.mean(ssim_list), time.perf_counter() - start
 
 
 def visualize(args, epoch, model, data_loader, writer, steering_dict):
@@ -75,28 +89,35 @@ def visualize(args, epoch, model, data_loader, writer, steering_dict):
             writer.add_figure('Rx_selection', selection_plot(model), epoch)
 
             AzRange_target = beamforming(smat_target, steering_dict, args, elevation)
+            AzRange_target = abs(AzRange_target)
             AzRange_target, mean, std = normalize_instance(AzRange_target)
+            # mean = 0
+            # std = 1
 
             AzRange_rec = model(smat_target, steering_dict, args, elevation, mean, std)
             rx_binary = model.rx_binary.repeat_interleave(model.n_in)
             steering_dict_low = steering_dict.copy()
             steering_dict_low['H'] = steering_dict['H'] * rx_binary.view(-1, 1, 1, 1)
             AzRange_corrupted = beamforming(smat_target, steering_dict_low, args, elevation)
+            AzRange_corrupted = abs(AzRange_corrupted)
 
             AzRange_rec = unnormalize(AzRange_rec, mean, std)
             AzRange_target = unnormalize(AzRange_target, mean, std)
 
-            for i in range(3,8):
+            for i in range(2,5):
                 writer.add_figure(f'{i}cm',
                                   cartesian_plot3(AzRange_corrupted[i], AzRange_rec[i], AzRange_target[i],
                                               steering_dict, args), epoch)
+                writer.add_figure(f'log{i}cm',
+                                  cartesian_plot3(AzRange_corrupted[i], AzRange_rec[i], AzRange_target[i],
+                                              steering_dict, args, log=True), epoch)
             break
 
 
 def build_model(args):
     model = SelectionUnetModel(
         in_chans=20,
-        out_chans=10,
+        out_chans=args.num_rx_chans,
         chans=args.num_chans,
         num_pool_layers=args.num_pools,
         drop_prob=args.drop_prob,
@@ -153,12 +174,12 @@ if __name__ == '__main__':
         steering_dict = create_steering_matrix(args)
 
     train_loader, dev_loader, display_loader = create_data_loaders(args)
-    _, _ = evaluate(args, 0, model, dev_loader, writer, steering_dict)
+    evaluate(args, 0, model, dev_loader, writer, steering_dict)
     visualize(args, 0, model, display_loader, writer, steering_dict)
 
     for epoch in range(start_epoch, args.num_epochs):
         train_loss, train_time = train_epoch(args, epoch, model, train_loader, optimizer, writer, steering_dict)
-        dev_loss, dev_time = evaluate(args, epoch + 1, model, dev_loader, writer, steering_dict)
+        dev_loss, dev_psnr, dev_ssim, dev_time = evaluate(args, epoch + 1, model, dev_loader, writer, steering_dict)
         visualize(args, epoch + 1, model, display_loader, writer, steering_dict)
 
         if dev_loss < best_dev_loss:
@@ -170,8 +191,9 @@ if __name__ == '__main__':
 
         save_model(args, args.exp_dir, epoch, model, optimizer, best_dev_loss, is_new_best, steering_dict)
         print(
-            f'Epoch = [{epoch:4d}/{args.num_epochs:4d}] TrainLoss = {train_loss:.4g} '
-            f'ValLoss = {dev_loss:.4g} TrainTime = {train_time:.4f}s ValTime = {dev_time:.4f}s',
+            f'Epoch = [{epoch:4d}/{args.num_epochs:4d}], TrainLoss = {train_loss:.4g} '
+            f'ValLoss = {dev_loss:.4g}, PSNR = {dev_psnr:.2f}, SSIM = {dev_ssim:.4f}'
+            f', TrainTime = {train_time:.4f}s ValTime = {dev_time:.4f}s',
         )
     print(args.test_name)
     print(f'Training done, best epoch: {best_epoch}, best ValLoss: {best_dev_loss}')
