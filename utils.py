@@ -6,7 +6,7 @@ import shutil
 import matplotlib.pyplot as plt
 import scipy.io as sio
 from torch import asin, sign, linspace, Tensor, zeros, meshgrid, exp, complex, log10, abs, mean, max, arange, cfloat, atan, \
-    sqrt, cat, view_as_real, view_as_complex, sum, log, topk, zeros_like, flip, rand, randn, randint
+    sqrt, cat, view_as_real, view_as_complex, log, topk, zeros_like, flip, rand, randn, randint
 from torch import sin as sin_th
 from torch.fft import fft, ifft
 from torch.nn.functional import interpolate, grid_sample
@@ -186,6 +186,8 @@ def cartesian_plot3(corrupted, rec, target, steering_dict, args, dB_Range=40, lo
         vmin = 0
 
     fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(12, 4))
+    fig.suptitle(args.test_name)
+    ax1.title.set_text('Corrupted')
     ax1.imshow(corrupted.detach().cpu(), origin='lower', cmap='jet', extent=[-1, 1, -1, 1], vmax=vmax, vmin=vmin)
     ax1.set_xticks([-1, -0.5, 0, 0.5, 1])
     ax1.set_yticks([-1, -0.5, 0, 0.5, 1])
@@ -193,6 +195,7 @@ def cartesian_plot3(corrupted, rec, target, steering_dict, args, dB_Range=40, lo
     ax1.set_yticklabels(f'{i:.2f}' for i in linspace(r_max/4, r_max, 5))
     ax1.set_ylabel('Range [m]')
 
+    ax2.title.set_text('Reconstruction')
     ax2.imshow(rec.detach().cpu(), origin='lower', cmap='jet', extent=[-1, 1, -1, 1], vmax=vmax, vmin=vmin)
     ax2.set_xticks([-1, -0.5, 0, 0.5, 1])
     ax2.set_yticks([-1, -0.5, 0, 0.5, 1])
@@ -200,6 +203,7 @@ def cartesian_plot3(corrupted, rec, target, steering_dict, args, dB_Range=40, lo
     ax2.set_yticklabels(f'{i:.2f}' for i in linspace(r_max/4, r_max, 5))
     ax2.set_xlabel('Azimuth [deg]')
 
+    ax3.title.set_text('Target')
     ax3.imshow(target.detach().cpu(), origin='lower', cmap='jet', extent=[-1, 1, -1, 1], vmax=vmax, vmin=vmin)
     ax3.set_xticks([-1, -0.5, 0, 0.5, 1])
     ax3.set_yticks([-1, -0.5, 0, 0.5, 1])
@@ -208,12 +212,51 @@ def cartesian_plot3(corrupted, rec, target, steering_dict, args, dB_Range=40, lo
 
     return fig
 
+def cartesian_save(file_name, AzRange, steering_dict, args, dB_Range=40, log=False):
+    Ts = 1 / args.Nfft / (steering_dict['freqs'][1] - steering_dict['freqs'][0] + 1e-16)
+    time_vector = arange(0, Ts * (args.Nfft - 1), Ts)
+    r = time_vector[:args.Nfft//2] * 3e8 / 2
+    r_max = r[-1]
+
+    AzRange /= AzRange.max()
+
+    if log:
+        vmax = 0
+        vmin = -dB_Range
+        AzRange = 20 * log10(AzRange)
+    else:
+        vmax = 1
+        vmin = 0
+
+    plt.imshow(AzRange.detach().cpu(), origin='lower', cmap='jet', extent=[-1, 1, -1, 1], vmax=vmax, vmin=vmin)
+    plt.xticks([-1, -0.5, 0, 0.5, 1],
+               [f'{int(i)}' for i in linspace(-args.start_angle, args.start_angle, 5)])
+    plt.yticks([-1, -0.5, 0, 0.5, 1],
+               [f'{i:.2f}' for i in linspace(r_max/4, r_max, 5)])
+    # plt.ylabel('Range [m]')
+    plt.savefig(file_name, bbox_inches='tight')
+
 def selection_plot(model):
     fig, ax = plt.subplots(figsize=(6, 6))
     rx = model.rx.detach().cpu()
     rx_binary = hard_topk(rx, model.n_out)
     ax.plot(rx, '.')
     ax.plot(rx_binary, '.')
+    # plt.legend(['rx', 'rx_binary'])
+    return fig
+
+def rx_plot(model):
+    fig, ax = plt.subplots(figsize=(6, 6))
+    rx_binary = model.rx_binary.detach().cpu()
+    ax.plot(rx_binary, '.')
+    # plt.legend(['rx', 'rx_binary'])
+    return fig
+
+def continuous_rx_plot(model):
+    fig, ax = plt.subplots(figsize=(6, 6))
+    rx = model.rx.detach().cpu()
+    ax.plot(rx, zeros_like(rx), '.')
+    ax.set_xlim([-1, 21])
     # plt.legend(['rx', 'rx_binary'])
     return fig
 
@@ -314,6 +357,11 @@ def az_range_mse2(input, target, d=0.15):
 def complex_mean(input, dim):
     return view_as_complex(mean(view_as_real(input), dim=dim))
 
+def complex_reshape(x, shape):
+    output = view_as_real(x)
+    output = output.reshape(*shape, 2)
+    return view_as_complex(output)
+
 def normalize(data, mean, stddev, eps=0.):
     return (data - mean) / (stddev + eps)
 
@@ -363,17 +411,23 @@ def save_model(args, exp_dir, epoch, model, optimizer, best_dev_loss, is_new_bes
 def create_arg_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('--test-name', type=str,
-        default='7mse/learned_1e-5_1e-4_gaussian_mvb_tanh', help='Test name')
+        default='cont_lin2/10/fix_random7', help='Test name')
     parser.add_argument('--resume', action='store_true',
                         help='If set, resume the training from a previous model checkpoint. '
                              '"--checkpoint" should be set with this')
-    parser.add_argument('--num-rx-chans', type=int, default=7, help='Number of U-Net channels')
     parser.add_argument('--lr', type=float, default=1e-5, help='Learning rate')
-    parser.add_argument('--selection-lr', type=float, default=1e-4, help='Learning rate of the selection layer')
-    parser.add_argument('--init', type=str, default='random',
-                        help='How to init the rx selection layer')
 
-    parser.add_argument('--seed', type=int, default=1, help='Random seed')
+    parser.add_argument('--num-rx-chans', type=int, default=10, help='Number of Rx channels')
+    parser.add_argument('--channel-lr', type=float, default=0, help='Learning rate of the channel selection layer')
+    parser.add_argument('--channel-init', type=str, default='random',
+                        help='How to init the channel selection layer')
+
+    parser.add_argument('--num-freq', type=int, default=7, help='Number of frequencies channels')
+    parser.add_argument('--freq-lr', type=float, default=1e-4, help='Learning rate of the frequencies selection layer')
+    parser.add_argument('--freq-init', type=str, default='random',
+                        help='How to init the freq selection layer')
+
+    parser.add_argument('--seed', type=int, default=7, help='Random seed')
     parser.add_argument('--checkpoint', type=str, default='summary/test/model.pt',
                         help='Path to an existing checkpoint. Used along with "--resume"')
     parser.add_argument('--sample-rate', type=float, default=1, help='Sample rate')
@@ -392,7 +446,7 @@ def create_arg_parser():
     #                     help='Path where model and results should be saved')
 
     # optimization parameters
-    parser.add_argument('--batch-size', default=64, type=int, help='Mini batch size')
+    parser.add_argument('--batch-size', default=32, type=int, help='Mini batch size')
     parser.add_argument('--num-epochs', type=int, default=200, help='Number of training epochs')
     parser.add_argument('--freq-start', type=int, default=62, help='GHz')
     parser.add_argument('--freq-stop', type=int, default=69, help='GHz')

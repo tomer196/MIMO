@@ -11,14 +11,17 @@ from utils import *
 import matplotlib.pyplot as plt
 
 args = create_arg_parser()
+args.device = 'cpu'
 data_set = SmatData(args.data_path, args)
 Smat, elevation = data_set[0]
 Smat = Smat.to(args.device)
 
 steering_dict = create_steering_matrix(args)
 # plot_beampatern(steering_dict, steering_dict['H'], args).show()
+Smat = Smat[:,:64]
+steering_dict['H'] = steering_dict['H'][:,:64,:,]
 
-for i in range(5):
+for i in range(2,3):
     rangeAzMap = beamforming(Smat, steering_dict, args, [i])
     rangeAzMap = abs(rangeAzMap).squeeze(0)
     fig = cartesian_plot(rangeAzMap, steering_dict, args)

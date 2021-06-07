@@ -1,40 +1,76 @@
 from warnings import simplefilter
 simplefilter(action='ignore', category=FutureWarning)
 import random
-import shutil
 import time
 import os
-# os.environ["CUDA_VISIBLE_DEVICES"] = "6"
-import torch
-from torch.utils.tensorboard import SummaryWriter
-from data_load import SmatData, create_data_loaders, create_datasets
-import matplotlib
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+from data_load import create_data_loaders
 # matplotlib.use('Agg')
 from selection_layer import *
+from continuous_layer import ContinuousUnetModel2
 from utils import *
-import h5py
 
-def evaluate(args, epoch, model, data_loader, steering_dict):
+
+def evaluate(args, epoch, model, data_loader, steering_dict, continuous):
     psnr_list = []
     ssim_list = []
+    psnr_list2 = []
+    ssim_list2 = []
+    psnr_list_cor = []
+    ssim_list_cor = []
+    # psnr_salsa_list = []
+    # ssim_salsa_list = []
     model.eval()
     losses =[]
     start = time.perf_counter()
     with torch.no_grad():
         for iter, data in enumerate(data_loader):
-            smat_target, elevation = data
-            smat_target = smat_target.to(args.device)
-            AzRange_target = beamforming(smat_target, steering_dict, args, elevation)
-            AzRange_target = abs(AzRange_target)
-            AzRange_target, mean, std = normalize_instance(AzRange_target)
+            smat1, smat2, elevation = data
+            smat1 = smat1.to(args.device)
+            smat2 = smat2.to(args.device)
+            smat_target2 = (smat1 + smat2) * 0.5
+            AzRange_target2 = beamforming(smat_target2, steering_dict, args, elevation)
+            AzRange_target2 = abs(AzRange_target2)
+            AzRange_target2, mean, std = normalize_instance(AzRange_target2)
 
-            AzRange_rec = model(smat_target, steering_dict, args, elevation, mean, std, sample=False)
-            az_range_loss = az_range_mse(AzRange_rec, AzRange_target)
+            AzRange_target1 = beamforming(smat1, steering_dict, args, elevation)
+            AzRange_target1 = abs(AzRange_target1)
+            AzRange_target1, mean, std = normalize_instance(AzRange_target1)
+
+            # rx_binary = model.rx_binary.repeat_interleave(model.n_in)
+            # smat_corr = smat1 * rx_binary.view(1,-1,1).to(args.device)
+            # smat_salsa = salsa_reconstruction(smat_corr, rx_binary)
+            # AzRange_salsa = beamforming(smat_salsa, steering_dict, args, elevation).abs()
+
+            if continuous:
+                AzRange_rec = model(smat1, smat2, steering_dict, args, elevation, mean, std, False)
+                AzRange_corrupted = model.sub_sample(smat1, smat2, steering_dict, args, elevation, False)
+            else:
+                AzRange_rec = model(smat_target2, steering_dict, args, elevation, mean, std, False)
+                AzRange_corrupted = model.sub_sample(smat_target2, steering_dict, args, elevation, False)
+
+            AzRange_corrupted = normalize(AzRange_corrupted, mean, std)
+
+
+            az_range_loss = az_range_mse(AzRange_rec, AzRange_target2)
 
             losses.append(az_range_loss.item())
-            psnr_list.append(psnr(AzRange_target, AzRange_rec))
-            ssim_list.append(ssim(AzRange_target, AzRange_rec))
-    print (f'Epoch: {epoch}, Loss: {np.mean(losses)}, PSNR: {np.mean(psnr_list):.2f}, SSIM: {np.mean(ssim_list):.4f}')
+            # psnr_list.append(psnr(AzRange_target1, AzRange_rec))
+            # ssim_list.append(ssim(AzRange_target1, AzRange_rec))
+            psnr_list2.append(psnr(AzRange_target2, AzRange_rec))
+            ssim_list2.append(ssim(AzRange_target2, AzRange_rec))
+            psnr_list_cor.append(psnr(AzRange_target2, AzRange_corrupted))
+            ssim_list_cor.append(ssim(AzRange_target2, AzRange_corrupted))
+            # psnr_salsa_list.append(psnr(AzRange_target1, AzRange_salsa))
+            # ssim_salsa_list.append(ssim(AzRange_target1, AzRange_salsa))
+    print (f'PSNR_corr: {np.mean(psnr_list_cor):.2f}+-{np.std(psnr_list_cor):.2f}, '
+           f'SSIM_corr: {np.mean(ssim_list_cor):.3f}+-{np.std(ssim_list_cor):.3f}')
+    # print (f'PSNR: {np.mean(psnr_list):.2f}+-{np.std(psnr_list):.2f}, '
+    #        f'SSIM: {np.mean(ssim_list):.3f}+-{np.std(ssim_list):.3f}')
+    print (f'PSNR2: {np.mean(psnr_list2):.2f}+-{np.std(psnr_list2):.2f}, '
+           f'SSIM2: {np.mean(ssim_list2):.3f}+-{np.std(ssim_list2):.3f}')
+    # print (f'SALSA - PSNR: {np.mean(psnr_salsa_list):.2f}+-{np.std(psnr_salsa_list):.2f}, '
+    #        f'SSIM: {np.mean(ssim_salsa_list):.3f}+-{np.std(ssim_salsa_list):.3f}')
     return np.mean(losses), time.perf_counter() - start
 
 
@@ -65,69 +101,69 @@ def visualize(args, epoch, model, data_loader, steering_dict):
             break
 
 
-def visualize56(args, model, steering_dict):
+def save_image(args, model, steering_dict, continuous, dev_loader, exp_dir, im_id=0):
     model.eval()
     with torch.no_grad():
-        with h5py.File("/home/tomerweiss/MIMO/Data/Validation/small_objects2/56.h5", 'r') as data:
-            tmp = data['Smat'][()]
-        tmp = complex(real=Tensor(tmp.real), imag=Tensor(tmp.imag))
-        smat_target = torch.zeros_like(tmp)
-        smat_target[::2, :] = tmp[:200, :]
-        smat_target[1::2, :] = tmp[200:, :]
-
-        elevation = Tensor([2]).long()
-        smat_target = smat_target.unsqueeze(0).to(args.device)
-
+        smat1, smat2, elevation = dev_loader.dataset[im_id]
+        smat1 = smat1.to(args.device).unsqueeze(0)
+        smat2 = smat2.to(args.device).unsqueeze(0)
+        elevation = [elevation]
+        smat_target = (smat1 + smat2) * 0.5
         AzRange_target = beamforming(smat_target, steering_dict, args, elevation)
         AzRange_target = abs(AzRange_target)
         AzRange_target, mean, std = normalize_instance(AzRange_target)
 
-        AzRange_rec = model(smat_target, steering_dict, args, elevation, mean, std, sample=False)
-        rx_binary = model.rx_binary.repeat_interleave(model.n_in)
-        steering_dict_low = steering_dict.copy()
-        steering_dict_low['H'] = steering_dict['H'] * rx_binary.view(-1, 1, 1, 1)
-        AzRange_corrupted = beamforming(smat_target, steering_dict_low, args, elevation)
-        AzRange_corrupted = abs(AzRange_corrupted)
+        if continuous:
+            AzRange_rec = model(smat1, smat2, steering_dict, args, elevation, mean, std, sample=False)
+            AzRange_corrupted = model.sub_sample(smat1, smat2, steering_dict, args, elevation, False)
+        else:
+            AzRange_rec = model(smat_target, steering_dict, args, elevation, mean, std, sample=False)
+            rx_binary = model.rx_binary.repeat_interleave(model.n_in)
+            steering_dict_low = steering_dict.copy()
+            steering_dict_low['H'] = steering_dict['H'] * rx_binary.view(-1, 1, 1, 1)
+            AzRange_corrupted = beamforming(smat_target, steering_dict_low, args, elevation)
+            AzRange_corrupted = abs(AzRange_corrupted)
+
+        # rx_binary = model.rx_binary.repeat_interleave(model.n_in)
+        # smat_corr = smat_target * rx_binary.view(1,-1,1).to(args.device)
+        # smat_salsa = salsa_reconstruction(smat_corr, rx_binary)
+        # AzRange_salsa = beamforming(smat_salsa, steering_dict, args, elevation)
+        # AzRange_salsa = abs(AzRange_salsa)
 
         AzRange_rec = unnormalize(AzRange_rec, mean, std)
         AzRange_target = unnormalize(AzRange_target, mean, std)
 
-        cartesian_plot3(AzRange_corrupted[0], AzRange_rec[0], AzRange_target[0],
-                                          steering_dict, args).show()
+        # cartesian_plot3(AzRange_corrupted[0], AzRange_rec[0], AzRange_target[0],
+        #                                   steering_dict, args).show()
 
-        cartesian_plot3(AzRange_corrupted[0], AzRange_rec[0], AzRange_target[0],
-                                          steering_dict, args, log=True).show()
+        pathlib.Path(exp_dir+'/rec').mkdir(parents=True, exist_ok=True)
+        cartesian_save(exp_dir + f'/rec/{im_id}_corr.png', AzRange_corrupted[0], steering_dict, args)
+        cartesian_save(exp_dir + f'/rec/{im_id}_rec.png', AzRange_rec[0], steering_dict, args)
+        # cartesian_save(exp_dir + f'/rec/{im_id}_gt.png', AzRange_target[0], steering_dict, args)
 
-def build_model(args):
-    model = SelectionUnetModelGSMultiVariate(
-        in_chans=20,
-        out_chans=args.num_rx_chans,
-        chans=args.num_chans,
-        num_pool_layers=args.num_pools,
-        drop_prob=args.drop_prob,
-        learn_selection=args.selection_lr != 0,
-    ).to(args.device)
+def build_model(args, continuous):
+    if continuous:
+        model = ContinuousUnetModel2(args).to(args.device)
+    else:
+        model = SelectionUnetModelGSMultiVariate(args).to(args.device)
     return model
 
 
-def load_model(checkpoint_file):
+def load_model(checkpoint_file, args, continuous):
     checkpoint = torch.load(checkpoint_file)
-    args = checkpoint['args']
+    # args = checkpoint['args']
     steering_dict = checkpoint['steering_dict']
-    model = build_model(args)
+    model = build_model(args, continuous)
     if args.data_parallel:
         model = torch.nn.DataParallel(model)
     model.load_state_dict(checkpoint['model'])
 
-    optimizer = build_optim(args, model)
-    optimizer.load_state_dict(checkpoint['optimizer'])
-    return checkpoint, model, optimizer, steering_dict
+    return checkpoint, model, steering_dict
 
 
 def build_optim(args, model):
     optimizer = torch.optim.Adam([
-                {'params': model.reconstruction.parameters()},
-                {'params': [model.rx, model.rx_sqrt_sigma], 'lr': args.selection_lr}
+                {'params': model.reconstruction.parameters()}
             ], lr=args.lr)
     return optimizer
 
@@ -137,20 +173,41 @@ if __name__ == '__main__':
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
+    continuous = True
+    args.num_rx_chans = 7
+    name = 'random'
+    if continuous:
+        args.test_name = f'new_cont/{args.num_rx_chans}/{name}'
+    else:
+        args.test_name = f'new2/{args.num_rx_chans}/{name}'
+    print(args.test_name)
     args.exp_dir = f'summary/{args.test_name}'
+    exp_dir = args.exp_dir
     args.checkpoint = f'summary/{args.test_name}/best_model.pt'
-    print(args)
+    # print(args)
 
-    checkpoint, model, optimizer, steering_dict = load_model(args.checkpoint)
+    checkpoint, model, steering_dict = load_model(args.checkpoint, args, continuous)
     args = checkpoint['args']
     del checkpoint
 
     loss = 0
-    train_loader, dev_loader, display_loader = create_data_loaders(args)
-    loss, _ = evaluate(args, 0, model, dev_loader, steering_dict)
+    _, dev_loader, display_loader = create_data_loaders(args)
+    # _, _ = evaluate(args, 0, model, dev_loader, steering_dict, continuous)
     # visualize(args, 0, model, display_loader, steering_dict)
-    visualize56(args, model, steering_dict)
 
-    print(args.test_name)
-    print(f'Done, loss: {loss:.4f}')
+    save_image(args, model, steering_dict, continuous, dev_loader, exp_dir, im_id=52)
+    save_image(args, model, steering_dict, continuous, dev_loader, exp_dir, im_id=73)
+    save_image(args, model, steering_dict, continuous, dev_loader, exp_dir, im_id=86)
+    save_image(args, model, steering_dict, continuous, dev_loader, exp_dir, im_id=97)
 
+    if continuous:
+        rx = model.rx
+    else:
+        rx = model.rx_binary
+        rx = Tensor([i for i in range(20)if rx[i]==1.])
+
+    f = open(exp_dir + "/rec/rx.txt", "a")
+    f.write(str(rx.detach().cpu().numpy()))
+    f.close()
+    import scipy.io as sio
+    sio.savemat(exp_dir + "/rec/rx.mat", {rx: rx.detach().cpu().numpy()})

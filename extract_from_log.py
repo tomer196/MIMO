@@ -1,13 +1,19 @@
-from tensorflow.python.framework import tensor_util
-from tensorflow.core.util import event_pb2
-from tensorflow.python.lib.io import tf_record
+path = "/home/tomerweiss/MIMO/summary/cont_lin2/7/" \
+       "big_learn_random_1e-3_long/events.out.tfevents.1621356681.floria.59697.0"
+import tensorflow.compat.v1 as tf
+tf.disable_v2_behavior()
+from matplotlib.pyplot import imshow, show
 
-def my_summary_iterator(path):
-    for r in tf_record.tf_record_iterator(path):
-        yield event_pb2.Event.FromString(r)
+image_str = tf.placeholder(tf.string)
+im_tf = tf.image.decode_image(image_str)
 
-for event in my_summary_iterator("/home/tomerweiss/MIMO/summary/7mse/learned_1e-5_1e-4_gaussian/events.out.tfevents.1610642757.floria.62839.0"):
-    if event.step == 1550 or event.step==1600:
-        for value in event.summary.value:
-            if value.tag.startswith('Rx_low'):
-                print(value.tag, event.step, value.tensor.string_val)
+sess = tf.InteractiveSession()
+with sess.as_default():
+    count = 0
+    for e in tf.train.summary_iterator(path):
+        if e.step == 1790:
+            for v in e.summary.value:
+                if v.tag == 'Rx_selection':
+                    im = im_tf.eval({image_str: v.image.encoded_image_string})
+                    imshow(im)
+                    show()
