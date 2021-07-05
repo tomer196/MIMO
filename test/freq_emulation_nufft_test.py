@@ -86,7 +86,7 @@ def sub_2(smat, args):
     # with NUFFT
     coord = freqs.unsqueeze(1)
     x_hat = nufft.nufft1_adjoint(signal.permute(0,2,1), coord,
-                                 [1, 64, 75], device=signal.device, Nfft=75)
+                                 [1, 64, 256], device=signal.device, Nfft=None)
     x_hat = x_hat.permute(0,2,1)[:, args.Nfft // 8:args.Nfft // 2, :]
     cartesian_plot(abs(x_hat), steering_dict, args).show()
 

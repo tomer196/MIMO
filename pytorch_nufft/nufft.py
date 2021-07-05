@@ -45,7 +45,7 @@ def nufft1_adjoint(input, coord, out_shape, oversamp=1.25, width=4.0, n=128,
     output = interp.gridding(input, os_shape2, width, kernel, coord, device)
 
     # IFFT=
-    output = _ifftc(output, axes=[-1], norm='backward', Nfft=Nfft)
+    output = _ifftc(output, oshape=out_shape, axes=[-1], norm='backward', Nfft=Nfft)
     # output = torch.fft.ifft(output, n=Nfft, dim=-1)
 
     # Crop
@@ -59,17 +59,19 @@ def nufft1_adjoint(input, coord, out_shape, oversamp=1.25, width=4.0, n=128,
 
     return output
 
-def _fftc(input, axes=None, norm='ortho'):
+def _fftc(input, oshape=None, axes=None, norm='ortho'):
     tmp = torch.fft.ifftshift(input, dim=axes)
     tmp = torch.fft.fftn(tmp, dim=axes, norm=norm)
     output = torch.fft.fftshift(tmp, dim=axes)
     return output
 
 
-def _ifftc(input, axes=None, norm='ortho', Nfft=None):
+def _ifftc(input, oshape=None, axes=None, norm='ortho', Nfft=None):
+    if oshape:
+        input = util.resize(input, oshape)
     input = torch.fft.ifftshift(input, dim=axes)
     output = torch.fft.ifftn(input, dim=axes, norm=norm,s=Nfft)
-    output = torch.fft.fftshift(output, dim=axes)
+    # output = torch.fft.fftshift(output, dim=axes)
     return output
 
 
