@@ -68,7 +68,7 @@ def lin_interp(data, x):
 
 def sub_2(smat, args):
     # emulate signal with 50 range bins
-    freqs = linspace(0, 74-1e-5, 60)
+    freqs = linspace(0, 74-1e-5, 75)
     freqs = freqs.sort().values.to(args.device)
     print(f'smat shape: {smat.shape}')
     print(f'freqs shape: {freqs.shape}')
