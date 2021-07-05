@@ -239,7 +239,7 @@ def cartesian_save(file_name, AzRange, steering_dict, args, dB_Range=40, log=Fal
 def selection_plot(model):
     fig, ax = plt.subplots(figsize=(6, 6))
     rx = model.rx.detach().cpu()
-    rx_binary = hard_topk(rx, model.n_out)
+    rx_binary = hard_topk(rx, model.channel_out)
     ax.plot(rx, '.')
     ax.plot(rx_binary, '.')
     # plt.legend(['rx', 'rx_binary'])
@@ -253,10 +253,18 @@ def rx_plot(model):
     return fig
 
 def continuous_rx_plot(model):
-    fig, ax = plt.subplots(figsize=(6, 6))
+    fig, ax = plt.subplots(figsize=(6, 1.8))
     rx = model.rx.detach().cpu()
     ax.plot(rx, zeros_like(rx), '.')
     ax.set_xlim([-1, 21])
+    # plt.legend(['rx', 'rx_binary'])
+    return fig
+
+def continuous_freqs_plot(model):
+    fig, ax = plt.subplots(figsize=(6, 1.8))
+    freqs = model.freqs.detach().cpu()
+    ax.plot(freqs, zeros_like(freqs), '.')
+    ax.set_xlim([-1, 76])
     # plt.legend(['rx', 'rx_binary'])
     return fig
 
@@ -330,6 +338,59 @@ def create_steering_matrix(args):
             'freqs': freqs,
             'TxRxPairs': TxRxPairs}
 
+def create_steering_matrix_from_freqs(args, elevation=None, freqs=None, ants_locations=None):
+    if ants_locations is None:
+        ants_locations = Tensor(sio.loadmat('matlab/ants_location.mat')['VtrigU_ants_location']).to(args.device)
+    if freqs is None:
+        freqs = arange(args.freq_points)
+    freqs_delta = (args.freq_stop - args.freq_start) / (args.freq_points - 1)
+    freqs = (args.freq_start + freqs * freqs_delta) # GHz
+    # freqs = linspace(args.freq_start, args.freq_stop, args.freq_points) * 1e9
+    n_tx = 20
+    n_rx = 20
+    start_angle = 60
+    num_pairs = n_tx * n_rx
+    TxRxPairs = zeros(num_pairs, 2).long().to(args.device)
+    for i in range(n_tx):
+        for j in range(n_rx):
+            TxRxPairs[i * n_tx + j, 0] = i
+            TxRxPairs[i * n_tx + j, 1] = j + 20
+    a1 = sin(deg2rad(-start_angle))
+    a2 = sin(deg2rad(start_angle))
+    theta_vec = asin(linspace(a1, a2, args.numOfDigitalBeams)).to(args.device)  # Azimuth
+    phi_vec = asin(linspace(sin(deg2rad(-5)), sin(deg2rad(5)), 5)).to(args.device)  # Elevation
+    phi_vec = phi_vec[elevation]
+    # phi_vec = asin(linspace(a1, a2, args.numOfDigitalBeams)).to(args.device)  # Elevation
+
+    # taylor_win = Tensor(sio.loadmat('matlab/taylorwin.mat')['taylor_win']).squeeze().to(args.device)
+    # taylor_win_El = taylor_win.repeat(args.freq_points, n_tx).T
+    # taylor_win_Az = taylor_win.repeat_interleave(n_tx).unsqueeze(1).repeat(1, args.freq_points)
+
+    # H = zeros(num_pairs, args.freq_points, args.numOfDigitalBeams, dtype=cfloat)
+    # for beam_idx in range(args.numOfDigitalBeams):
+    #     theta = theta_vec[beam_idx]
+    #     K_vec_x = freqs * sin(theta) / 3e8
+    #     K_vec_y = freqs * sin(phi_s) / 3e8
+    #
+    #     # for ii in range(num_pairs):
+    #     #     D = ants_locations[TxRxPairs[ii, 0], :] + ants_locations[TxRxPairs[ii, 1], :]
+    #     #     H[ii, :, beam_idx] = exp(complex(real=Tensor([0]), imag=2 * pi * (K_vec_x * D[0] + K_vec_y * D[1])))
+    #     D = ants_locations[TxRxPairs[:, 0], :] + ants_locations[TxRxPairs[:, 1], :]
+    #     H[:, :, beam_idx] = exp(complex(real=Tensor([0]),
+    #                                     imag=2 * pi * (K_vec_x.unsqueeze(0) * D[:, 0].unsqueeze(1) +
+    #                                                    K_vec_y.unsqueeze(0) * D[:, 1].unsqueeze(1))))
+    #     H[:, :, beam_idx] = H[:, :, beam_idx] * taylor_win_El * taylor_win_Az
+
+    K_vec_x = freqs.unsqueeze(1) * sin_th(theta_vec).unsqueeze(0) / 0.3
+    K_vec_y = freqs.unsqueeze(1) * sin_th(phi_vec).unsqueeze(0) / 0.3
+    D = ants_locations[TxRxPairs[:, 0], :] + ants_locations[TxRxPairs[:, 1], :]
+    # H shape (antennas, freq_points, azimuth, elevation)
+    H = exp(complex(real=Tensor([0]).to(args.device), imag=2 * pi * (
+            (K_vec_x.unsqueeze(0) * D[:, 0].unsqueeze(1).unsqueeze(2)).unsqueeze(3) +
+            (K_vec_y.unsqueeze(0) * D[:, 1].unsqueeze(1).unsqueeze(2)).unsqueeze(2))))
+    # H = H * taylor_win_El.unsqueeze(2).unsqueeze(3) * taylor_win_Az.unsqueeze(2).unsqueeze(3)
+    return H.permute(3, 0, 1, 2)
+
 def beamforming(Smat, steering_dict, args, elevation_ind=[2]):  # default elevation 0 deg
     # rangeAzMap = zeros(args.Nfft // 2, args.numOfDigitalBeams, dtype=cfloat)
     # for beam_idx in range(args.numOfDigitalBeams):
@@ -340,8 +401,8 @@ def beamforming(Smat, steering_dict, args, elevation_ind=[2]):  # default elevat
     if len(Smat.shape) == 2:  # batch dim
         Smat = Smat.unsqueeze(0)
     BR_response = ifft(complex_mean(H*Smat.unsqueeze(-1), dim=1), n=args.Nfft, dim=1)
-    rangeAzMap = BR_response[:, args.Nfft // 8:args.Nfft // 2, :]
-    rangeAzMap_db = 20 * log10(abs(rangeAzMap) / max(abs(rangeAzMap)))
+    rangeAzMap = abs(BR_response[:, args.Nfft // 8:args.Nfft // 2, :])
+    rangeAzMap_db = 20 * log10(rangeAzMap / max(abs(rangeAzMap)))
     return rangeAzMap
 
 def az_range_mse(input, target):
@@ -411,20 +472,20 @@ def save_model(args, exp_dir, epoch, model, optimizer, best_dev_loss, is_new_bes
 def create_arg_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('--test-name', type=str,
-        default='cont_lin2/10/fix_random7', help='Test name')
+        default='test/65_uniform_learn_1e-4', help='Test name')
     parser.add_argument('--resume', action='store_true',
                         help='If set, resume the training from a previous model checkpoint. '
                              '"--checkpoint" should be set with this')
     parser.add_argument('--lr', type=float, default=1e-5, help='Learning rate')
 
-    parser.add_argument('--num-rx-chans', type=int, default=10, help='Number of Rx channels')
+    parser.add_argument('--num-rx-chans', type=int, default=20, help='Number of Rx channels')
     parser.add_argument('--channel-lr', type=float, default=0, help='Learning rate of the channel selection layer')
-    parser.add_argument('--channel-init', type=str, default='random',
+    parser.add_argument('--channel-init', type=str, default='full',
                         help='How to init the channel selection layer')
 
-    parser.add_argument('--num-freq', type=int, default=7, help='Number of frequencies channels')
+    parser.add_argument('--num-freqs', type=int, default=65, help='Number of frequencies channels')
     parser.add_argument('--freq-lr', type=float, default=1e-4, help='Learning rate of the frequencies selection layer')
-    parser.add_argument('--freq-init', type=str, default='random',
+    parser.add_argument('--freq-init', type=str, default='uniform',
                         help='How to init the freq selection layer')
 
     parser.add_argument('--seed', type=int, default=7, help='Random seed')
@@ -447,7 +508,7 @@ def create_arg_parser():
 
     # optimization parameters
     parser.add_argument('--batch-size', default=32, type=int, help='Mini batch size')
-    parser.add_argument('--num-epochs', type=int, default=200, help='Number of training epochs')
+    parser.add_argument('--num-epochs', type=int, default=1000, help='Number of training epochs')
     parser.add_argument('--freq-start', type=int, default=62, help='GHz')
     parser.add_argument('--freq-stop', type=int, default=69, help='GHz')
     parser.add_argument('--freq-points', type=int, default=75, help='Number of freqs points')

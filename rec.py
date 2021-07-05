@@ -37,17 +37,17 @@ def evaluate(args, epoch, model, data_loader, steering_dict, continuous):
             AzRange_target1 = abs(AzRange_target1)
             AzRange_target1, mean, std = normalize_instance(AzRange_target1)
 
-            # rx_binary = model.rx_binary.repeat_interleave(model.n_in)
+            # rx_binary = model.rx_binary.repeat_interleave(model.channel_in)
             # smat_corr = smat1 * rx_binary.view(1,-1,1).to(args.device)
             # smat_salsa = salsa_reconstruction(smat_corr, rx_binary)
             # AzRange_salsa = beamforming(smat_salsa, steering_dict, args, elevation).abs()
 
             if continuous:
-                AzRange_rec = model(smat1, smat2, steering_dict, args, elevation, mean, std, False)
-                AzRange_corrupted = model.sub_sample(smat1, smat2, steering_dict, args, elevation, False)
+                AzRange_rec = model(smat1, smat2, elevation, mean, std)
+                AzRange_corrupted = model.sub_sample(smat1, smat2, elevation)
             else:
-                AzRange_rec = model(smat_target2, steering_dict, args, elevation, mean, std, False)
-                AzRange_corrupted = model.sub_sample(smat_target2, steering_dict, args, elevation, False)
+                AzRange_rec = model(smat_target2,  elevation, mean, std, False)
+                AzRange_corrupted = model.sub_sample(smat_target2, elevation, False)
 
             AzRange_corrupted = normalize(AzRange_corrupted, mean, std)
 
@@ -74,33 +74,6 @@ def evaluate(args, epoch, model, data_loader, steering_dict, continuous):
     return np.mean(losses), time.perf_counter() - start
 
 
-def visualize(args, epoch, model, data_loader, steering_dict):
-    model.eval()
-    with torch.no_grad():
-        for iter, data in enumerate(data_loader):
-            smat_target, elevation = data
-            smat_target = smat_target.to(args.device)
-            selection_plot(model).show()
-
-            AzRange_target = beamforming(smat_target, steering_dict, args, elevation)
-            AzRange_target = abs(AzRange_target)
-            AzRange_target, mean, std = normalize_instance(AzRange_target)
-
-            AzRange_rec = model(smat_target, steering_dict, args, elevation, mean, std, sample=False)
-            rx_binary = model.rx_binary.repeat_interleave(model.n_in)
-            steering_dict_low = steering_dict.copy()
-            steering_dict_low['H'] = steering_dict['H'] * rx_binary.view(-1, 1, 1, 1)
-            AzRange_corrupted = beamforming(smat_target, steering_dict_low, args, elevation)
-
-            AzRange_rec = unnormalize(AzRange_rec, mean, std)
-            AzRange_target = unnormalize(AzRange_target, mean, std)
-
-            for i in range(5,6):
-                cartesian_plot3(AzRange_corrupted[i], AzRange_rec[i], AzRange_target[i],
-                                              steering_dict, args).show()
-            break
-
-
 def save_image(args, model, steering_dict, continuous, dev_loader, exp_dir, im_id=0):
     model.eval()
     with torch.no_grad():
@@ -114,17 +87,17 @@ def save_image(args, model, steering_dict, continuous, dev_loader, exp_dir, im_i
         AzRange_target, mean, std = normalize_instance(AzRange_target)
 
         if continuous:
-            AzRange_rec = model(smat1, smat2, steering_dict, args, elevation, mean, std, sample=False)
-            AzRange_corrupted = model.sub_sample(smat1, smat2, steering_dict, args, elevation, False)
+            AzRange_rec = model(smat1, smat2, elevation, mean, std)
+            AzRange_corrupted = model.sub_sample(smat1, smat2, elevation)
         else:
             AzRange_rec = model(smat_target, steering_dict, args, elevation, mean, std, sample=False)
-            rx_binary = model.rx_binary.repeat_interleave(model.n_in)
+            rx_binary = model.rx_binary.repeat_interleave(model.channel_in)
             steering_dict_low = steering_dict.copy()
             steering_dict_low['H'] = steering_dict['H'] * rx_binary.view(-1, 1, 1, 1)
             AzRange_corrupted = beamforming(smat_target, steering_dict_low, args, elevation)
             AzRange_corrupted = abs(AzRange_corrupted)
 
-        # rx_binary = model.rx_binary.repeat_interleave(model.n_in)
+        # rx_binary = model.rx_binary.repeat_interleave(model.channel_in)
         # smat_corr = smat_target * rx_binary.view(1,-1,1).to(args.device)
         # smat_salsa = salsa_reconstruction(smat_corr, rx_binary)
         # AzRange_salsa = beamforming(smat_salsa, steering_dict, args, elevation)
@@ -193,7 +166,6 @@ if __name__ == '__main__':
     loss = 0
     _, dev_loader, display_loader = create_data_loaders(args)
     # _, _ = evaluate(args, 0, model, dev_loader, steering_dict, continuous)
-    # visualize(args, 0, model, display_loader, steering_dict)
 
     save_image(args, model, steering_dict, continuous, dev_loader, exp_dir, im_id=52)
     save_image(args, model, steering_dict, continuous, dev_loader, exp_dir, im_id=73)

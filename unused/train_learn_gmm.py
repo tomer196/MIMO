@@ -101,7 +101,7 @@ def visualize(args, epoch, model, data_loader, writer, steering_dict):
             AzRange_target, mean, std = normalize_instance(AzRange_target)
 
             AzRange_rec = model(smat_target, steering_dict, args, elevation, mean, std, sample=False)
-            rx_binary = model.rx_binary.repeat_interleave(model.n_in)
+            rx_binary = model.rx_binary.repeat_interleave(model.channel_in)
             steering_dict_low = steering_dict.copy()
             steering_dict_low['H'] = steering_dict['H'] * rx_binary.view(-1, 1, 1, 1)
             AzRange_corrupted = beamforming(smat_target, steering_dict_low, args, elevation)

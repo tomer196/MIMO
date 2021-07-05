@@ -30,10 +30,9 @@ def train_epoch(args, epoch, model, data_loader, optimizer, writer, steering_dic
 
         smat_target = (smat1 + smat2) * 0.5
         AzRange_target = beamforming(smat_target, steering_dict, args, elevation)
-        AzRange_target = abs(AzRange_target)
         AzRange_target, mean, std = normalize_instance(AzRange_target)
 
-        AzRange_rec = model(smat1, smat2, steering_dict, args, elevation, mean, std)
+        AzRange_rec = model(smat1, smat2, elevation, mean, std)
         loss = az_range_mse(AzRange_rec, AzRange_target)
 
         loss.backward()
@@ -45,11 +44,6 @@ def train_epoch(args, epoch, model, data_loader, optimizer, writer, steering_dic
         if iter % 20 == 0:
             print(f'Epoch = [{epoch:3d}/{args.num_epochs:3d}] Iter = [{iter:4d}/{len(data_loader):4d}] '
                 f'Avg Loss = {avg_loss:.4g} ')
-            # print(f'p: {model.p.item()}')
-            # print(f'mu1: {model.mu1.abs().max()}')
-            # print(f'mu2: {model.mu2.abs().max()}')
-            # print(f'sqrt1: {model.sqrt_sigma1.abs().max()}')
-            # print(f'sqrt2: {model.sqrt_sigma2.abs().max()}')
     return avg_loss, time.perf_counter() - start_epoch
 
 
@@ -69,13 +63,12 @@ def evaluate(args, epoch, model, data_loader, writer, steering_dict):
 
                 smat_target = (smat1 + smat2) * 0.5
                 AzRange_target = beamforming(smat_target, steering_dict, args, elevation)
-                AzRange_target = abs(AzRange_target)
                 AzRange_target, mean, std = normalize_instance(AzRange_target)
 
-                AzRange_rec = model(smat1, smat2, steering_dict, args, elevation, mean, std)
+                AzRange_rec = model(smat1, smat2, elevation, mean, std)
                 az_range_loss = az_range_mse(AzRange_rec, AzRange_target)
 
-                AzRange_corr = model.sub_sample(smat1, smat2, steering_dict, args, elevation)
+                AzRange_corr = model.sub_sample(smat1, smat2, elevation)
                 AzRange_corr = normalize(AzRange_corr, mean, std)
 
                 losses.append(az_range_loss.item())
@@ -97,16 +90,17 @@ def visualize(args, epoch, model, data_loader, writer, steering_dict):
     model.eval()
     with torch.no_grad():
         for iter, data in enumerate(data_loader):
-            print(model.rx.detach().cpu().numpy())
+            # print(model.rx.detach().cpu().numpy())
             writer.add_text('rx', str(model.rx.detach().cpu().numpy()), epoch)
+            writer.add_text('freqs', str(model.freqs.detach().cpu().numpy()), epoch)
             smat1, smat2, elevation = data
             smat1 = smat1.to(args.device)
             smat2 = smat2.to(args.device)
 
             smat_target = (smat1 + smat2) * 0.5
             AzRange_target = beamforming(smat_target, steering_dict, args, elevation)
-            AzRange_target = abs(AzRange_target)
             writer.add_figure('Rx_selection', continuous_rx_plot(model), epoch)
+            writer.add_figure('Freqs_selection', continuous_freqs_plot(model), epoch)
             # fig, ax = plt.subplots(figsize=(6, 6))
             # sqrt_sigma = tanh(model.rx_sqrt_sigma.detach().cpu())
             # sigma = sqrt_sigma @ sqrt_sigma.T + diag(model.rx_diag_sigma ** 2).detach().cpu()
@@ -116,8 +110,8 @@ def visualize(args, epoch, model, data_loader, writer, steering_dict):
 
             AzRange_target, mean, std = normalize_instance(AzRange_target)
 
-            AzRange_rec = model(smat1, smat2, steering_dict, args, elevation, mean, std)
-            AzRange_corrupted = model.sub_sample(smat1, smat2, steering_dict, args, elevation)
+            AzRange_rec = model(smat1, smat2, elevation, mean, std)
+            AzRange_corrupted = model.sub_sample(smat1, smat2, elevation)
 
             AzRange_rec = unnormalize(AzRange_rec, mean, std)
             AzRange_target = unnormalize(AzRange_target, mean, std)
@@ -154,8 +148,8 @@ def load_model(checkpoint_file):
 def build_optim(args, model):
     optimizer = torch.optim.AdamW([
                 {'params': model.reconstruction.parameters()},
-                {'params': [model.rx],
-                 'lr': args.channel_lr}
+                {'params': [model.rx], 'lr': args.channel_lr},
+                {'params': [model.freqs], 'lr': args.freq_lr}
             ], lr=args.lr)
     return optimizer
 

@@ -164,11 +164,11 @@ class SelectionUnetModelGSMultiVariate(Module):
             #     self.rx.data = self.rx / self.rx.max()
             #     self.rx_sqrt_sigma.data = self.rx_sqrt_sigma / sqrt(trace(self.rx_sqrt_sigma @ self.rx_sqrt_sigma.T))
             self.rx_binary = sample_subset_multiGS(self.rx, self.rx_sqrt_sigma, self.rx_diag_sigma, self.n_out, 0.1)
-            # self.rx_binary = topk2(self.rx, self.n_out, 0.1)
+            # self.rx_binary = topk2(self.rx, self.channel_out, 0.1)
         else:
             self.rx_binary = hard_topk(self.rx, self.n_out)
             # manual_seed(0)
-            # self.rx_binary = sample_subset_gaussian(self.rx, self.rx_sqrt_sigma, self.n_out, 0.1)
+            # self.rx_binary = sample_subset_gaussian(self.rx, self.rx_sqrt_sigma, self.channel_out, 0.1)
         H = steering_dict['H'][..., elevation].permute(3, 0, 1, 2)
         full = H * smat.unsqueeze(-1)
         low = full * self.rx_binary.repeat_interleave(self.n_in).view(1, -1, 1, 1)

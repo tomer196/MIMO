@@ -107,7 +107,8 @@ def create_datasets(args):
     val_data = data_set(
         root=args.data_path + 'Validation3',
         args=args,
-        sample_rate=args.sample_rate
+        sample_rate=args.sample_rate,
+        slice_range=(1, 4),
     )
     display_data = data_set(
         root=args.data_path + 'Validation3/metric',

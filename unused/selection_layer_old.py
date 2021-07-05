@@ -340,7 +340,7 @@ class SelectionUnetModelGSUniVariate(Module):
                 self.rx.data = self.rx - self.rx.min()+1e-10
                 self.rx.data = self.rx / self.rx.max()
             self.rx_binary = sample_subset_GS(self.rx, self.n_out, 0.1)
-            # self.rx_binary = topk2(self.rx, self.n_out, 0.1)
+            # self.rx_binary = topk2(self.rx, self.channel_out, 0.1)
         else:
             self.rx_binary = hard_topk(self.rx, self.n_out)
 
@@ -399,11 +399,11 @@ class SelectionUnetModelGSMultiVariate(Module):
             #     self.rx.data = self.rx / self.rx.max()
             #     self.rx_sqrt_sigma.data = self.rx_sqrt_sigma / sqrt(trace(self.rx_sqrt_sigma @ self.rx_sqrt_sigma.T))
             self.rx_binary = sample_subset_multiGS(self.rx, self.rx_sqrt_sigma, self.rx_diag_sigma, self.n_out, 0.1)
-            # self.rx_binary = topk2(self.rx, self.n_out, 0.1)
+            # self.rx_binary = topk2(self.rx, self.channel_out, 0.1)
         else:
             self.rx_binary = hard_topk(self.rx, self.n_out)
             # manual_seed(0)
-            # self.rx_binary = sample_subset_gaussian(self.rx, self.rx_sqrt_sigma, self.n_out, 0.1)
+            # self.rx_binary = sample_subset_gaussian(self.rx, self.rx_sqrt_sigma, self.channel_out, 0.1)
         H = steering_dict['H'][..., elevation].permute(3, 0, 1, 2)
         full = H * smat.unsqueeze(-1)
         low = full * self.rx_binary.repeat_interleave(self.n_in).view(1, -1, 1, 1)
@@ -425,10 +425,10 @@ class SelectionUnetModelGMM(Module):
 
         self.p = Parameter(rand_like(rx), requires_grad=self.learn_selection)
         self.mu = Parameter(rand(self.n_in, self.n_in), requires_grad=self.learn_selection)
-        # self.sqrt_sigma1 = Parameter(eye(self.n_in), requires_grad=self.learn_selection)
+        # self.sqrt_sigma1 = Parameter(eye(self.channel_in), requires_grad=self.learn_channels)
 
-        # self.mu2 = Parameter(randn_like(rx), requires_grad=self.learn_selection)
-        # self.sqrt_sigma2 = Parameter(eye(self.n_in), requires_grad=self.learn_selection)
+        # self.mu2 = Parameter(randn_like(rx), requires_grad=self.learn_channels)
+        # self.sqrt_sigma2 = Parameter(eye(self.channel_in), requires_grad=self.learn_channels)
         self.rx_binary = hard_sample_subset_GMM(self.mu, self.p, self.n_out)
 
 
