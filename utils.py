@@ -477,16 +477,17 @@ def create_arg_parser():
     parser.add_argument('--resume', action='store_true',
                         help='If set, resume the training from a previous model checkpoint. '
                              '"--checkpoint" should be set with this')
-    parser.add_argument('--lr', type=float, default=1e-5, help='Learning rate')
+    parser.add_argument('--lr', type=float, default=1e-5, help='Learning rate of the '
+                                                               'reconstruction network')
 
-    parser.add_argument('--num-rx-chans', type=int, default=20, help='Number of Rx channels')
-    parser.add_argument('--channel-lr', type=float, default=0, help='Learning rate of the channel selection layer')
-    parser.add_argument('--channel-init', type=str, default='full',
+    parser.add_argument('--num-rx-chans', type=int, default=7, help='Number of Rx channels')
+    parser.add_argument('--channel-lr', type=float, default=1e-3, help='Learning rate of the channel selection layer')
+    parser.add_argument('--channel-init', type=str, default='random',
                         help='How to init the channel selection layer')
 
-    parser.add_argument('--num-freqs', type=int, default=50, help='Number of frequencies channels')
-    parser.add_argument('--freq-lr', type=float, default=1e-4, help='Learning rate of the frequencies selection layer')
-    parser.add_argument('--freq-init', type=str, default='random',
+    parser.add_argument('--num-freqs', type=int, default=75, help='Number of frequencies channels')
+    parser.add_argument('--freq-lr', type=float, default=0, help='Learning rate of the frequencies selection layer')
+    parser.add_argument('--freq-init', type=str, default='full',
                         help='How to init the freq selection layer')
 
     parser.add_argument('--seed', type=int, default=4, help='Random seed')
