@@ -1,6 +1,7 @@
-Data/
-Raw_data/
+data_robot/
 summary/
-.idea/
-.DS_store
+Data/
+
 __pycache__/
+models/__pycache__/
+pytorch_nufft/__pycache__/

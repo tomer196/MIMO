@@ -23,6 +23,17 @@ def train_epoch(args, epoch, model, data_loader, optimizer, writer, steering_dic
     avg_loss = 0.
     start_epoch = time.perf_counter()
     global_step = epoch * len(data_loader)
+    if epoch < 50:
+        model.multi_scale_sigma=10.
+    elif epoch < 100:
+        model.multi_scale_sigma=5.
+    elif epoch < 150:
+        model.multi_scale_sigma=3.
+    elif epoch < 2000:
+        model.multi_scale_sigma=1.
+    else:
+        model.multi_scale_sigma = None
+
     for iter, data in enumerate(data_loader):
         smat1, smat2, elevation = data
         smat1 = smat1.to(args.device)
@@ -32,7 +43,7 @@ def train_epoch(args, epoch, model, data_loader, optimizer, writer, steering_dic
         AzRange_target = beamforming(smat_target, steering_dict, args, elevation)
         AzRange_target, mean, std = normalize_instance(AzRange_target)
 
-        AzRange_rec = model(smat1, smat2, elevation, mean, std)
+        AzRange_rec = model(smat1, smat2, elevation, mean, std, train=True)
         loss = az_range_mse(AzRange_rec, AzRange_target)
 
         loss.backward()
@@ -68,7 +79,7 @@ def evaluate(args, epoch, model, data_loader, writer, steering_dict):
                 AzRange_rec = model(smat1, smat2, elevation, mean, std)
                 az_range_loss = az_range_mse(AzRange_rec, AzRange_target)
 
-                AzRange_corr = model.sub_sample(smat1, smat2, elevation).abs()
+                AzRange_corr = model.sub_sample(smat1, smat2, elevation)
                 AzRange_corr = normalize(AzRange_corr, mean, std)
 
                 losses.append(az_range_loss.item())
@@ -111,7 +122,7 @@ def visualize(args, epoch, model, data_loader, writer, steering_dict):
             AzRange_target, mean, std = normalize_instance(AzRange_target)
 
             AzRange_rec = model(smat1, smat2, elevation, mean, std)
-            AzRange_corrupted = model.sub_sample(smat1, smat2, elevation).abs()
+            AzRange_corrupted = model.sub_sample(smat1, smat2, elevation)
 
             AzRange_rec = unnormalize(AzRange_rec, mean, std)
             AzRange_target = unnormalize(AzRange_target, mean, std)
@@ -127,7 +138,7 @@ def visualize(args, epoch, model, data_loader, writer, steering_dict):
 
 
 def build_model(args):
-    model = ContinuousUnetModel2(args).to(args.device)
+    model = ContinuousUnetModelGaussian(args).to(args.device)
     return model
 
 

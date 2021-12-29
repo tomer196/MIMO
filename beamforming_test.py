@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 args = create_arg_parser()
 args.device = 'cpu'
 data_set = SmatData(args.data_path, args)
-Smat, elevation = data_set[0]
+Smat,_, elevation = data_set[0]
 Smat = Smat.to(args.device)
 
 steering_dict = create_steering_matrix(args)

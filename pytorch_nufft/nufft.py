@@ -45,11 +45,11 @@ def nufft1_adjoint(input, coord, out_shape, oversamp=1.25, width=4.0, n=128,
     output = interp.gridding(input, os_shape2, width, kernel, coord, device)
 
     # IFFT=
-    output = _ifftc(output, oshape=out_shape, axes=[-1], norm='backward', Nfft=Nfft)
+    output = _ifftc(output, oshape=None, axes=[-1], norm='backward', Nfft=Nfft)
     # output = torch.fft.ifft(output, n=Nfft, dim=-1)
 
     # Crop
-    # out_shape2 = out_shape[:-1] + [Nfft]
+    # out_shape2 = [1, 64, 256]
     output = util.resize(output, out_shape2, device=device)
     a = util.prod(os_shape2[-ndim:]) / util.prod(out_shape2[-ndim:]) ** 0.5
     output = output * a
@@ -67,10 +67,12 @@ def _fftc(input, oshape=None, axes=None, norm='ortho'):
 
 
 def _ifftc(input, oshape=None, axes=None, norm='ortho', Nfft=None):
-    if oshape:
-        input = util.resize(input, oshape)
-    input = torch.fft.ifftshift(input, dim=axes)
-    output = torch.fft.ifftn(input, dim=axes, norm=norm,s=Nfft)
+    if oshape is None:
+        oshape = input.shape
+    input = util.resize(input, oshape)
+    # input = torch.fft.ifftshift(input, dim=axes)
+    # output = torch.fft.ifftn(input, dim=axes, norm=norm,s=Nfft)
+    output = torch.fft.ifft(input, dim=-1, norm=norm)
     # output = torch.fft.fftshift(output, dim=axes)
     return output
 

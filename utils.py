@@ -342,7 +342,7 @@ def create_steering_matrix_from_freqs(args, elevation=None, freqs=None, ants_loc
     if ants_locations is None:
         ants_locations = Tensor(sio.loadmat('matlab/ants_location.mat')['VtrigU_ants_location']).to(args.device)
     if freqs is None:
-        freqs = arange(args.freq_points)
+        freqs = arange(args.freq_points).to(args.device)
     freqs_delta = (args.freq_stop - args.freq_start) / (args.freq_points - 1)
     freqs = (args.freq_start + freqs * freqs_delta) # GHz
     # freqs = linspace(args.freq_start, args.freq_stop, args.freq_points) * 1e9
@@ -359,7 +359,8 @@ def create_steering_matrix_from_freqs(args, elevation=None, freqs=None, ants_loc
     a2 = sin(deg2rad(start_angle))
     theta_vec = asin(linspace(a1, a2, args.numOfDigitalBeams)).to(args.device)  # Azimuth
     phi_vec = asin(linspace(sin(deg2rad(-5)), sin(deg2rad(5)), 5)).to(args.device)  # Elevation
-    phi_vec = phi_vec[elevation]
+    if elevation is not None:
+        phi_vec = phi_vec[elevation]
     # phi_vec = asin(linspace(a1, a2, args.numOfDigitalBeams)).to(args.device)  # Elevation
 
     # taylor_win = Tensor(sio.loadmat('matlab/taylorwin.mat')['taylor_win']).squeeze().to(args.device)
@@ -402,7 +403,7 @@ def beamforming(Smat, steering_dict, args, elevation_ind=[2]):  # default elevat
         Smat = Smat.unsqueeze(0)
     BR_response = ifft(complex_mean(H*Smat.unsqueeze(-1), dim=1), n=args.Nfft, dim=1)
     rangeAzMap = abs(BR_response[:, args.Nfft // 8:args.Nfft // 2, :])
-    rangeAzMap_db = 20 * log10(rangeAzMap / max(abs(rangeAzMap)))
+    # rangeAzMap_db = 20 * log10(rangeAzMap / max(abs(rangeAzMap)))
     return rangeAzMap
 
 def az_range_mse(input, target):
@@ -472,7 +473,7 @@ def save_model(args, exp_dir, epoch, model, optimizer, best_dev_loss, is_new_bes
 def create_arg_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('--test-name', type=str,
-        default='test/65_uniform_learn_1e-4', help='Test name')
+        default='freqs/50_random4_1e-4_gaussian2_bigger', help='Test name')
     parser.add_argument('--resume', action='store_true',
                         help='If set, resume the training from a previous model checkpoint. '
                              '"--checkpoint" should be set with this')
@@ -483,12 +484,12 @@ def create_arg_parser():
     parser.add_argument('--channel-init', type=str, default='full',
                         help='How to init the channel selection layer')
 
-    parser.add_argument('--num-freqs', type=int, default=65, help='Number of frequencies channels')
+    parser.add_argument('--num-freqs', type=int, default=50, help='Number of frequencies channels')
     parser.add_argument('--freq-lr', type=float, default=1e-4, help='Learning rate of the frequencies selection layer')
-    parser.add_argument('--freq-init', type=str, default='uniform',
+    parser.add_argument('--freq-init', type=str, default='random',
                         help='How to init the freq selection layer')
 
-    parser.add_argument('--seed', type=int, default=7, help='Random seed')
+    parser.add_argument('--seed', type=int, default=4, help='Random seed')
     parser.add_argument('--checkpoint', type=str, default='summary/test/model.pt',
                         help='Path to an existing checkpoint. Used along with "--resume"')
     parser.add_argument('--sample-rate', type=float, default=1, help='Sample rate')
@@ -508,7 +509,7 @@ def create_arg_parser():
 
     # optimization parameters
     parser.add_argument('--batch-size', default=32, type=int, help='Mini batch size')
-    parser.add_argument('--num-epochs', type=int, default=1000, help='Number of training epochs')
+    parser.add_argument('--num-epochs', type=int, default=400, help='Number of training epochs')
     parser.add_argument('--freq-start', type=int, default=62, help='GHz')
     parser.add_argument('--freq-stop', type=int, default=69, help='GHz')
     parser.add_argument('--freq-points', type=int, default=75, help='Number of freqs points')
